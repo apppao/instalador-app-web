@@ -33,6 +33,8 @@ h2{font-size:1.1rem;color:var(--brand);margin:1.25rem 0 0}
 .list li{display:flex;flex-wrap:wrap;gap:.5rem;justify-content:space-between;align-items:center;padding:.75rem 0;border-bottom:1px solid var(--line)}
 .list button{margin:0}
 input[type=checkbox]{width:auto;margin-right:.5rem}
+select{width:100%;padding:.6rem;border:1px solid #8a979c;border-radius:6px;font:inherit;background:#fff}
+.badge{font-size:11px;padding:2px 8px;border-radius:8px;white-space:nowrap}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -57,6 +59,7 @@ input[type=checkbox]{width:auto;margin-right:.5rem}
     <nav aria-label="Principal">
       <a href="#inicio" data-nav="inicio">Inicio</a>
       <a href="#clientes" data-nav="clientes">Clientes</a>
+      <a href="#trabajos" data-nav="trabajos">Trabajos</a>
       <a href="#servicios" data-nav="servicios">Servicios</a>
       <a href="#configuracion" data-nav="configuracion">Configuración</a>
     </nav>
@@ -91,6 +94,46 @@ input[type=checkbox]{width:auto;margin-right:.5rem}
         <button type="submit" id="cl-save">Guardar cliente</button>
         <button type="button" id="cl-cancel" class="ghost">Cancelar</button>
         <p id="cl-fmsg" class="msg" role="alert"></p>
+      </form>
+    </section>
+    <section id="trabajos" data-section hidden>
+      <h1>Trabajos</h1>
+      <p id="jb-msg" class="msg" role="status"></p>
+      <label for="jb-filter">Filtrar por estado</label>
+      <select id="jb-filter">
+        <option value="">Todos</option><option value="solicitud">Solicitud</option><option value="pendiente">Pendiente de confirmar</option>
+        <option value="confirmado">Confirmado</option><option value="en_proceso">En proceso</option><option value="completado">Completado</option><option value="cancelado">Cancelado</option>
+      </select>
+      <button id="jb-new" type="button">Nuevo trabajo</button>
+      <ul id="jb-list" class="list"></ul>
+      <form id="jb-form" novalidate hidden>
+        <h2 id="jb-title-h">Nuevo trabajo</h2>
+        <label for="j-client">Cliente (obligatorio)</label>
+        <select id="j-client"></select>
+        <label for="j-title">Título del trabajo (obligatorio)</label>
+        <input id="j-title" maxlength="120">
+        <label for="j-desc">Descripción</label>
+        <input id="j-desc" maxlength="1000">
+        <label for="j-address">Dirección del servicio</label>
+        <input id="j-address" maxlength="300">
+        <label for="j-maps">Enlace de mapas (opcional)</label>
+        <input id="j-maps" type="url" maxlength="500" placeholder="https://…">
+        <label for="j-start">Fecha y hora de inicio (hora de República Dominicana)</label>
+        <input id="j-start" type="datetime-local">
+        <label for="j-dur">Duración estimada en minutos</label>
+        <input id="j-dur" type="number" min="1" max="1440" step="1">
+        <label for="j-status">Estado</label>
+        <select id="j-status">
+          <option value="solicitud">Solicitud</option><option value="pendiente">Pendiente de confirmar</option><option value="confirmado">Confirmado</option>
+          <option value="en_proceso">En proceso</option><option value="completado">Completado</option><option value="cancelado">Cancelado</option>
+        </select>
+        <label for="j-price">Precio acordado en RD$ (obligatorio)</label>
+        <input id="j-price" inputmode="decimal" placeholder="Ej.: 3500.00">
+        <label for="j-notes">Notas</label>
+        <input id="j-notes" maxlength="1000">
+        <button type="submit" id="jb-save">Guardar trabajo</button>
+        <button type="button" id="jb-cancel" class="ghost">Cancelar</button>
+        <p id="jb-fmsg" class="msg" role="alert"></p>
       </form>
     </section>
     <section id="servicios" data-section hidden>
@@ -147,7 +190,7 @@ setTimeout(function(){window.__fail("Tarda demasiado. Revisa tu conexión o prue
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-import { getFirestore, doc, getDoc, updateDoc, serverTimestamp, collection, addDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+import { getFirestore, doc, getDoc, updateDoc, serverTimestamp, collection, addDoc, getDocs, query, where, Timestamp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
 
 // La configuración web de Firebase no es secreta: la seguridad la dan el login y firestore.rules.
 const firebaseConfig = {
@@ -172,10 +215,11 @@ function say(id, text, kind) { const el = $(id); el.textContent = text; el.class
 function setBusy(btnId, on, label) { busy = on; const b = $(btnId); b.disabled = on; b.textContent = label; }
 
 function route() {
-  const h = location.hash.slice(1), view = ["configuracion", "clientes", "servicios"].includes(h) ? h : "inicio";
+  const h = location.hash.slice(1), view = ["configuracion", "clientes", "servicios", "trabajos"].includes(h) ? h : "inicio";
   document.querySelectorAll("[data-section]").forEach((s) => (s.hidden = s.id !== view));
   if (view === "clientes" && bizId) loadClients();
   if (view === "servicios" && bizId) loadServices();
+  if (view === "trabajos" && bizId) loadJobs();
   document.querySelectorAll("[data-nav]").forEach((a) => {
     if (a.dataset.nav === view) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   });
@@ -399,6 +443,87 @@ $("sv-form").addEventListener("submit", async (e) => {
     $("sv-form").hidden = true; await loadServices(); say("sv-msg", "Servicio guardado.", "ok");
   } catch (err) { say("sv-fmsg", "No se pudo guardar (" + (err.code || err.message) + "). Inténtalo de nuevo.", "err"); }
   finally { setBusy("sv-save", false, "Guardar servicio"); }
+});
+
+// ---- Trabajos (Fase 2C) ---- Fechas en hora de República Dominicana (UTC-4, sin horario de verano).
+const STATUS = { solicitud: ["Solicitud", "#e4e7e9", "#444"], pendiente: ["Pendiente de confirmar", "#fdecc8", "#633806"], confirmado: ["Confirmado", "#dcefe3", "#14532d"], en_proceso: ["En proceso", "#d6e6f5", "#12385c"], completado: ["Completado", "#d4efe9", "#0b4a3f"], cancelado: ["Cancelado", "#e4e7e9", "#444"] };
+const TZ = "America/Santo_Domingo";
+let jobs = [], editingJob = null;
+const fmtDT = (ts) => ts.toDate().toLocaleString("es-DO", { timeZone: TZ, weekday: "short", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+const toInput = (ts) => new Intl.DateTimeFormat("sv-SE", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ts.toDate()).replace(" ", "T");
+const fromInput = (v) => new Date(v + ":00-04:00");
+const clientName = (id) => (clients.find((c) => c.id === id) || {}).name || "Cliente no encontrado";
+const mapsLink = (j) => j.mapsUrl || (j.address ? "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(j.address) : "");
+function overlaps(start, minutes, selfId) {
+  const s = start.getTime(), e = s + minutes * 60000;
+  return jobs.filter((j) => j.id !== selfId && j.status !== "cancelado" && j.startAt.toMillis() < e && j.startAt.toMillis() + j.durationMinutes * 60000 > s);
+}
+
+async function loadJobs() {
+  say("jb-msg", "Cargando trabajos…");
+  try {
+    if (!clients.length) {
+      const cs = await getDocs(query(collection(db, "clients"), where("businessId", "==", bizId)));
+      clients = cs.docs.map((d) => ({ id: d.id, ...d.data() }));
+    }
+    const snap = await getDocs(query(collection(db, "jobs"), where("businessId", "==", bizId)));
+    jobs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    say("jb-msg", ""); renderJobs();
+  } catch (e) { say("jb-msg", "No se pudieron cargar los trabajos (" + (e.code || e.message) + ").", "err"); }
+}
+
+function renderJobs() {
+  const f = $("jb-filter").value;
+  const rows = jobs.filter((j) => !f || j.status === f).sort((a, b) => a.startAt.toMillis() - b.startAt.toMillis());
+  $("jb-list").innerHTML = rows.length ? rows.map((j) => {
+    const [lbl, bg, fg] = STATUS[j.status] || [j.status, "#eee", "#333"];
+    const clash = j.status !== "cancelado" && overlaps(j.startAt.toDate(), j.durationMinutes, j.id).length;
+    const ml = mapsLink(j);
+    return `<li><div><strong${j.status === "cancelado" ? ' style="text-decoration:line-through"' : ""}>${esc(j.title)}</strong> <span class="badge" style="background:${bg};color:${fg}">${lbl}</span>${clash ? ' <span class="badge" style="background:#fdecc8;color:#633806">Se solapa</span>' : ""}<br>${esc(clientName(j.clientId))} · ${fmtDT(j.startAt)} · ${j.durationMinutes} min<br>${money.format(j.agreedPrice / 100)}${ml ? ` · <a href="${esc(ml)}" target="_blank" rel="noopener">Abrir en Maps</a>` : ""}</div><div><button type="button" class="ghost" data-jedit="${j.id}">Editar</button></div></li>`;
+  }).join("") : "<li>No hay trabajos que mostrar.</li>";
+}
+
+function openJob(j) {
+  editingJob = j ? j.id : null;
+  $("jb-title-h").textContent = j ? "Editar trabajo" : "Nuevo trabajo";
+  const opts = clients.filter((c) => c.active || (j && c.id === j.clientId)).sort((a, b) => a.name.localeCompare(b.name, "es")).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+  $("j-client").innerHTML = '<option value="">Elige un cliente…</option>' + opts;
+  $("j-client").value = j ? j.clientId : "";
+  $("j-title").value = j ? j.title : ""; $("j-desc").value = j ? j.description || "" : ""; $("j-address").value = j ? j.address || "" : "";
+  $("j-maps").value = j ? j.mapsUrl || "" : ""; $("j-start").value = j ? toInput(j.startAt) : ""; $("j-dur").value = j ? j.durationMinutes : 60;
+  $("j-status").value = j ? j.status : "solicitud"; $("j-price").value = j ? (j.agreedPrice / 100).toFixed(2) : ""; $("j-notes").value = j ? j.notes || "" : "";
+  say("jb-fmsg", ""); $("jb-form").hidden = false; $("j-client").focus();
+}
+$("jb-new").addEventListener("click", () => openJob(null));
+$("jb-cancel").addEventListener("click", () => { $("jb-form").hidden = true; });
+$("jb-filter").addEventListener("change", renderJobs);
+$("jb-list").addEventListener("click", (e) => { const id = e.target.dataset.jedit; if (id) openJob(jobs.find((j) => j.id === id)); });
+
+$("jb-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (busy) return;
+  const n = parseFloat($("j-price").value.replace(/,/g, "")), dur = parseInt($("j-dur").value, 10), maps = $("j-maps").value.trim();
+  const d = { clientId: $("j-client").value, title: $("j-title").value.trim(), description: $("j-desc").value.trim(), address: $("j-address").value.trim(), mapsUrl: maps, durationMinutes: dur, status: $("j-status").value, agreedPrice: Math.round(n * 100), notes: $("j-notes").value.trim() };
+  if (!d.clientId) return say("jb-fmsg", "Elige un cliente.", "err");
+  if (!d.title) return say("jb-fmsg", "Escribe el título del trabajo.", "err");
+  if (!$("j-start").value) return say("jb-fmsg", "Elige la fecha y la hora de inicio.", "err");
+  const start = fromInput($("j-start").value);
+  if (isNaN(start)) return say("jb-fmsg", "La fecha y la hora no son válidas.", "err");
+  if (!Number.isInteger(dur) || dur <= 0 || dur > 1440) return say("jb-fmsg", "La duración debe ser un número de minutos mayor que 0 (máximo 1440).", "err");
+  if (!isFinite(n) || n < 0 || n > 1e9) return say("jb-fmsg", "Escribe un precio válido (0 o más).", "err");
+  if (maps && !/^https?:\/\//i.test(maps)) return say("jb-fmsg", "El enlace de mapas debe empezar con http:// o https://.", "err");
+  if (d.status !== "cancelado") {
+    const c = overlaps(start, dur, editingJob);
+    if (c.length && !confirm("Este trabajo se solapa con:\n" + c.map((j) => "• " + j.title + " (" + fmtDT(j.startAt) + ")").join("\n") + "\n\n¿Guardar de todos modos?")) return;
+  }
+  say("jb-fmsg", ""); setBusy("jb-save", true, "Guardando…");
+  try {
+    const data = { ...d, startAt: Timestamp.fromDate(start) };
+    if (editingJob) await updateDoc(doc(db, "jobs", editingJob), { ...data, updatedAt: serverTimestamp() });
+    else await addDoc(collection(db, "jobs"), { ...data, businessId: bizId, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    $("jb-form").hidden = true; await loadJobs(); say("jb-msg", "Trabajo guardado.", "ok");
+  } catch (err) { say("jb-fmsg", "No se pudo guardar (" + (err.code || err.message) + "). Inténtalo de nuevo.", "err"); }
+  finally { setBusy("jb-save", false, "Guardar trabajo"); }
 });
 </script>
 </body>
