@@ -28,6 +28,11 @@ button:disabled{opacity:.6;cursor:wait}
 .msg.err{color:var(--err)}.msg.ok{color:var(--ok)}
 .note{font-size:.9rem;color:#445}
 #loading{text-align:center;margin-top:20vh}
+h2{font-size:1.1rem;color:var(--brand);margin:1.25rem 0 0}
+.list{list-style:none;padding:0;margin:1rem 0}
+.list li{display:flex;flex-wrap:wrap;gap:.5rem;justify-content:space-between;align-items:center;padding:.75rem 0;border-bottom:1px solid var(--line)}
+.list button{margin:0}
+input[type=checkbox]{width:auto;margin-right:.5rem}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -51,6 +56,8 @@ button:disabled{opacity:.6;cursor:wait}
     <strong id="biz-title">Instalador</strong>
     <nav aria-label="Principal">
       <a href="#inicio" data-nav="inicio">Inicio</a>
+      <a href="#clientes" data-nav="clientes">Clientes</a>
+      <a href="#servicios" data-nav="servicios">Servicios</a>
       <a href="#configuracion" data-nav="configuracion">Configuración</a>
     </nav>
     <button id="logout-btn" type="button" class="ghost">Cerrar sesión</button>
@@ -60,6 +67,53 @@ button:disabled{opacity:.6;cursor:wait}
       <h1>Inicio</h1>
       <p>Aquí aparecerán tus citas, saldos y cobros cuando se activen los módulos de las próximas fases.</p>
       <p class="note">Los documentos que genere esta aplicación son comerciales y no constituyen comprobante fiscal con NCF.</p>
+    </section>
+    <section id="clientes" data-section hidden>
+      <h1>Clientes</h1>
+      <p id="cl-msg" class="msg" role="status"></p>
+      <label for="cl-search">Buscar por nombre o teléfono</label>
+      <input id="cl-search" type="search">
+      <label><input id="cl-arch" type="checkbox">Mostrar archivados</label>
+      <button id="cl-new" type="button">Nuevo cliente</button>
+      <ul id="cl-list" class="list"></ul>
+      <form id="cl-form" novalidate hidden>
+        <h2 id="cl-title">Nuevo cliente</h2>
+        <label for="c-name">Nombre (obligatorio)</label>
+        <input id="c-name" maxlength="120">
+        <label for="c-phone">Teléfono (obligatorio)</label>
+        <input id="c-phone" type="tel" maxlength="40">
+        <label for="c-email">Correo</label>
+        <input id="c-email" type="email" maxlength="120">
+        <label for="c-address">Dirección habitual</label>
+        <input id="c-address" maxlength="300">
+        <label for="c-notes">Notas</label>
+        <input id="c-notes" maxlength="1000">
+        <button type="submit" id="cl-save">Guardar cliente</button>
+        <button type="button" id="cl-cancel" class="ghost">Cancelar</button>
+        <p id="cl-fmsg" class="msg" role="alert"></p>
+      </form>
+    </section>
+    <section id="servicios" data-section hidden>
+      <h1>Catálogo de servicios</h1>
+      <p class="note">El precio del catálogo es solo una sugerencia inicial: cambiarlo no modifica trabajos ni documentos ya creados.</p>
+      <p id="sv-msg" class="msg" role="status"></p>
+      <label for="sv-search">Buscar por nombre</label>
+      <input id="sv-search" type="search">
+      <label><input id="sv-arch" type="checkbox">Mostrar inactivos</label>
+      <button id="sv-new" type="button">Nuevo servicio</button>
+      <ul id="sv-list" class="list"></ul>
+      <form id="sv-form" novalidate hidden>
+        <h2 id="sv-title">Nuevo servicio</h2>
+        <label for="s-name">Nombre (obligatorio)</label>
+        <input id="s-name" maxlength="120">
+        <label for="s-desc">Descripción</label>
+        <input id="s-desc" maxlength="500">
+        <label for="s-price">Precio predeterminado en RD$ (obligatorio)</label>
+        <input id="s-price" inputmode="decimal" placeholder="Ej.: 1500.00">
+        <button type="submit" id="sv-save">Guardar servicio</button>
+        <button type="button" id="sv-cancel" class="ghost">Cancelar</button>
+        <p id="sv-fmsg" class="msg" role="alert"></p>
+      </form>
     </section>
     <section id="configuracion" data-section hidden>
       <h1>Configuración del negocio</h1>
@@ -93,7 +147,7 @@ setTimeout(function(){window.__fail("Tarda demasiado. Revisa tu conexión o prue
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-import { getFirestore, doc, getDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+import { getFirestore, doc, getDoc, updateDoc, serverTimestamp, collection, addDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
 
 // La configuración web de Firebase no es secreta: la seguridad la dan el login y firestore.rules.
 const firebaseConfig = {
@@ -109,7 +163,7 @@ const auth = getAuth(initializeApp(firebaseConfig));
 const db = getFirestore(auth.app);
 const $ = (id) => document.getElementById(id);
 const MAX_LOGO = 150000; // caracteres; debe coincidir con firestore.rules
-let bizRef = null, busy = false, logo = "";
+let bizRef = null, busy = false, logo = "", bizId = "", clients = [], editingId = null;
 
 function showOnly(id) {
   for (const v of ["loading", "login-view", "app-view"]) $(v).hidden = v !== id;
@@ -118,8 +172,10 @@ function say(id, text, kind) { const el = $(id); el.textContent = text; el.class
 function setBusy(btnId, on, label) { busy = on; const b = $(btnId); b.disabled = on; b.textContent = label; }
 
 function route() {
-  const view = location.hash === "#configuracion" ? "configuracion" : "inicio";
+  const h = location.hash.slice(1), view = ["configuracion", "clientes", "servicios"].includes(h) ? h : "inicio";
   document.querySelectorAll("[data-section]").forEach((s) => (s.hidden = s.id !== view));
+  if (view === "clientes" && bizId) loadClients();
+  if (view === "servicios" && bizId) loadServices();
   document.querySelectorAll("[data-nav]").forEach((a) => {
     if (a.dataset.nav === view) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   });
@@ -149,7 +205,7 @@ onAuthStateChanged(auth, async (user) => {
       say("login-msg", "Tu usuario no tiene un negocio asignado.", "err");
       return;
     }
-    bizRef = doc(db, "businesses", m.data().businessId);
+    bizId = m.data().businessId; bizRef = doc(db, "businesses", bizId);
     const b = await getDoc(bizRef);
     if (!b.exists()) throw new Error("negocio-no-existe");
     const d = b.data();
@@ -216,6 +272,133 @@ $("biz-form").addEventListener("submit", async (e) => {
     say("biz-msg", "Cambios guardados.", "ok");
   } catch (err) { say("biz-msg", "No se pudo guardar (" + (err.code || err.message) + "). Inténtalo de nuevo.", "err"); }
   finally { setBusy("biz-btn", false, "Guardar cambios"); }
+});
+
+// ---- Clientes (Fase 2A) ----
+const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const digitsOf = (s) => String(s).replace(/\D/g, "");
+
+async function loadClients() {
+  say("cl-msg", "Cargando clientes…");
+  try {
+    const snap = await getDocs(query(collection(db, "clients"), where("businessId", "==", bizId)));
+    clients = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    say("cl-msg", ""); renderClients();
+  } catch (e) { say("cl-msg", "No se pudieron cargar los clientes (" + (e.code || e.message) + ").", "err"); }
+}
+
+function renderClients() {
+  const q = $("cl-search").value.trim().toLowerCase(), dq = digitsOf(q), arch = $("cl-arch").checked;
+  const rows = clients
+    .filter((c) => (arch || c.active) && (!q || c.name.toLowerCase().includes(q) || (dq && digitsOf(c.phone).includes(dq))))
+    .sort((a, b) => a.name.localeCompare(b.name, "es"));
+  $("cl-list").innerHTML = rows.length
+    ? rows.map((c) => `<li><div><strong>${esc(c.name)}</strong>${c.active ? "" : " <em>(archivado)</em>"}<br>${esc(c.phone)}${c.email ? " · " + esc(c.email) : ""}</div><div><button type="button" class="ghost" data-edit="${c.id}">Editar</button> <button type="button" class="ghost" data-toggle="${c.id}">${c.active ? "Archivar" : "Reactivar"}</button></div></li>`).join("")
+    : "<li>No hay clientes que mostrar.</li>";
+}
+
+function openForm(c) {
+  editingId = c ? c.id : null;
+  $("cl-title").textContent = c ? "Editar cliente" : "Nuevo cliente";
+  $("c-name").value = c ? c.name : ""; $("c-phone").value = c ? c.phone : ""; $("c-email").value = c ? c.email || "" : "";
+  $("c-address").value = c ? c.address || "" : ""; $("c-notes").value = c ? c.notes || "" : "";
+  say("cl-fmsg", ""); $("cl-form").hidden = false; $("c-name").focus();
+}
+$("cl-new").addEventListener("click", () => openForm(null));
+$("cl-cancel").addEventListener("click", () => { $("cl-form").hidden = true; });
+$("cl-search").addEventListener("input", renderClients);
+$("cl-arch").addEventListener("change", renderClients);
+
+$("cl-list").addEventListener("click", async (e) => {
+  const ed = e.target.dataset.edit, tg = e.target.dataset.toggle;
+  if (ed) openForm(clients.find((c) => c.id === ed));
+  if (tg && !busy) {
+    const c = clients.find((x) => x.id === tg);
+    if (!confirm(c.active ? "¿Archivar este cliente? Su historial se conserva." : "¿Reactivar este cliente?")) return;
+    busy = true;
+    try { await updateDoc(doc(db, "clients", tg), { active: !c.active, updatedAt: serverTimestamp() }); await loadClients(); }
+    catch (err) { say("cl-msg", "No se pudo actualizar (" + (err.code || err.message) + ").", "err"); }
+    finally { busy = false; }
+  }
+});
+
+$("cl-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (busy) return;
+  const d = { name: $("c-name").value.trim(), phone: $("c-phone").value.trim(), email: $("c-email").value.trim(), address: $("c-address").value.trim(), notes: $("c-notes").value.trim() };
+  if (!d.name) return say("cl-fmsg", "Escribe el nombre del cliente.", "err");
+  if (digitsOf(d.phone).length < 7) return say("cl-fmsg", "Escribe un teléfono válido (mínimo 7 dígitos).", "err");
+  if (d.email && !EMAIL.test(d.email)) return say("cl-fmsg", "El correo no tiene un formato válido.", "err");
+  say("cl-fmsg", ""); setBusy("cl-save", true, "Guardando…");
+  try {
+    if (editingId) await updateDoc(doc(db, "clients", editingId), { ...d, updatedAt: serverTimestamp() });
+    else await addDoc(collection(db, "clients"), { ...d, businessId: bizId, active: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    $("cl-form").hidden = true; await loadClients(); say("cl-msg", "Cliente guardado.", "ok");
+  } catch (err) { say("cl-fmsg", "No se pudo guardar (" + (err.code || err.message) + "). Inténtalo de nuevo.", "err"); }
+  finally { setBusy("cl-save", false, "Guardar cliente"); }
+});
+
+// ---- Servicios (Fase 2B) ----  Los importes se guardan en centavos enteros.
+const money = new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" });
+let services = [], editingSvc = null;
+
+async function loadServices() {
+  say("sv-msg", "Cargando servicios…");
+  try {
+    const snap = await getDocs(query(collection(db, "services"), where("businessId", "==", bizId)));
+    services = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    say("sv-msg", ""); renderServices();
+  } catch (e) { say("sv-msg", "No se pudieron cargar los servicios (" + (e.code || e.message) + ").", "err"); }
+}
+
+function renderServices() {
+  const q = $("sv-search").value.trim().toLowerCase(), arch = $("sv-arch").checked;
+  const rows = services.filter((s) => (arch || s.active) && (!q || s.name.toLowerCase().includes(q))).sort((a, b) => a.name.localeCompare(b.name, "es"));
+  $("sv-list").innerHTML = rows.length
+    ? rows.map((s) => `<li><div><strong>${esc(s.name)}</strong>${s.active ? "" : " <em>(inactivo)</em>"}<br>${money.format(s.defaultPrice / 100)}${s.description ? " · " + esc(s.description) : ""}</div><div><button type="button" class="ghost" data-sedit="${s.id}">Editar</button> <button type="button" class="ghost" data-stoggle="${s.id}">${s.active ? "Desactivar" : "Activar"}</button></div></li>`).join("")
+    : "<li>No hay servicios que mostrar.</li>";
+}
+
+function openSvc(s) {
+  editingSvc = s ? s.id : null;
+  $("sv-title").textContent = s ? "Editar servicio" : "Nuevo servicio";
+  $("s-name").value = s ? s.name : ""; $("s-desc").value = s ? s.description || "" : ""; $("s-price").value = s ? (s.defaultPrice / 100).toFixed(2) : "";
+  say("sv-fmsg", ""); $("sv-form").hidden = false; $("s-name").focus();
+}
+$("sv-new").addEventListener("click", () => openSvc(null));
+$("sv-cancel").addEventListener("click", () => { $("sv-form").hidden = true; });
+$("sv-search").addEventListener("input", renderServices);
+$("sv-arch").addEventListener("change", renderServices);
+
+$("sv-list").addEventListener("click", async (e) => {
+  const ed = e.target.dataset.sedit, tg = e.target.dataset.stoggle;
+  if (ed) openSvc(services.find((s) => s.id === ed));
+  if (tg && !busy) {
+    const s = services.find((x) => x.id === tg);
+    if (!confirm(s.active ? "¿Desactivar este servicio? No se borra nada." : "¿Activar este servicio?")) return;
+    busy = true;
+    try { await updateDoc(doc(db, "services", tg), { active: !s.active, updatedAt: serverTimestamp() }); await loadServices(); }
+    catch (err) { say("sv-msg", "No se pudo actualizar (" + (err.code || err.message) + ").", "err"); }
+    finally { busy = false; }
+  }
+});
+
+$("sv-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (busy) return;
+  const name = $("s-name").value.trim(), description = $("s-desc").value.trim();
+  const n = parseFloat($("s-price").value.replace(/,/g, ""));
+  if (!name) return say("sv-fmsg", "Escribe el nombre del servicio.", "err");
+  if (!isFinite(n) || n < 0 || n > 1e9) return say("sv-fmsg", "Escribe un precio válido (0 o más).", "err");
+  const defaultPrice = Math.round(n * 100);
+  say("sv-fmsg", ""); setBusy("sv-save", true, "Guardando…");
+  try {
+    if (editingSvc) await updateDoc(doc(db, "services", editingSvc), { name, description, defaultPrice, updatedAt: serverTimestamp() });
+    else await addDoc(collection(db, "services"), { name, description, defaultPrice, businessId: bizId, active: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    $("sv-form").hidden = true; await loadServices(); say("sv-msg", "Servicio guardado.", "ok");
+  } catch (err) { say("sv-fmsg", "No se pudo guardar (" + (err.code || err.message) + "). Inténtalo de nuevo.", "err"); }
+  finally { setBusy("sv-save", false, "Guardar servicio"); }
 });
 </script>
 </body>
