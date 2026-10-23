@@ -35,6 +35,15 @@ h2{font-size:1.1rem;color:var(--brand);margin:1.25rem 0 0}
 input[type=checkbox]{width:auto;margin-right:.5rem}
 select{width:100%;padding:.6rem;border:1px solid #8a979c;border-radius:6px;font:inherit;background:#fff}
 .badge{font-size:11px;padding:2px 8px;border-radius:8px;white-space:nowrap}
+.seg{display:flex;gap:6px;margin:.5rem 0}
+.seg button{flex:1;margin:0;background:#fff;color:var(--brand);border:1px solid var(--brand);font-weight:400}
+.seg button[aria-pressed=true]{background:var(--brand);color:#fff;font-weight:700}
+.agnav{display:flex;gap:8px;align-items:center;justify-content:space-between;margin:.5rem 0}
+.agnav button{margin:0}
+.mes{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;text-align:center}
+.mes button{margin:0;padding:.5rem 0;background:#fff;color:var(--ink);border:1px solid var(--line);font-weight:400;font-size:.85rem}
+.mes .hdr{font-size:.75rem;color:#556}
+.mes .has{font-weight:700;border-color:var(--brand)}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -58,6 +67,7 @@ select{width:100%;padding:.6rem;border:1px solid #8a979c;border-radius:6px;font:
     <strong id="biz-title">Instalador</strong>
     <nav aria-label="Principal">
       <a href="#inicio" data-nav="inicio">Inicio</a>
+      <a href="#agenda" data-nav="agenda">Agenda</a>
       <a href="#clientes" data-nav="clientes">Clientes</a>
       <a href="#trabajos" data-nav="trabajos">Trabajos</a>
       <a href="#servicios" data-nav="servicios">Servicios</a>
@@ -96,8 +106,24 @@ select{width:100%;padding:.6rem;border:1px solid #8a979c;border-radius:6px;font:
         <p id="cl-fmsg" class="msg" role="alert"></p>
       </form>
     </section>
+    <section id="agenda" data-section hidden>
+      <h1>Agenda</h1>
+      <div class="seg" role="group" aria-label="Vista de la agenda">
+        <button type="button" data-v="dia">Día</button><button type="button" data-v="semana">Semana</button><button type="button" data-v="mes">Mes</button>
+      </div>
+      <div class="agnav">
+        <button type="button" id="ag-prev" class="ghost" aria-label="Anterior">‹</button>
+        <strong id="ag-label"></strong>
+        <button type="button" id="ag-next" class="ghost" aria-label="Siguiente">›</button>
+        <button type="button" id="ag-today" class="ghost">Hoy</button>
+      </div>
+      <p id="ag-msg" class="msg" role="status"></p>
+      <div id="ag-body"></div>
+      <button id="ag-new" type="button">Nuevo trabajo</button>
+    </section>
     <section id="trabajos" data-section hidden>
       <h1>Trabajos</h1>
+      <p class="note">Se muestran los trabajos de los últimos 30 días y los próximos 90. Los demás se ven en la Agenda.</p>
       <p id="jb-msg" class="msg" role="status"></p>
       <label for="jb-filter">Filtrar por estado</label>
       <select id="jb-filter">
@@ -120,8 +146,8 @@ select{width:100%;padding:.6rem;border:1px solid #8a979c;border-radius:6px;font:
         <input id="j-maps" type="url" maxlength="500" placeholder="https://…">
         <label for="j-start">Fecha y hora de inicio (hora de República Dominicana)</label>
         <input id="j-start" type="datetime-local">
-        <label for="j-dur">Duración estimada en minutos</label>
-        <input id="j-dur" type="number" min="1" max="1440" step="1">
+        <label for="j-dur">Duración estimada en horas (ej.: 1.5)</label>
+        <input id="j-dur" type="number" min="0.25" max="24" step="0.25">
         <label for="j-status">Estado</label>
         <select id="j-status">
           <option value="solicitud">Solicitud</option><option value="pendiente">Pendiente de confirmar</option><option value="confirmado">Confirmado</option>
@@ -207,6 +233,7 @@ const db = getFirestore(auth.app);
 const $ = (id) => document.getElementById(id);
 const MAX_LOGO = 150000; // caracteres; debe coincidir con firestore.rules
 let bizRef = null, busy = false, logo = "", bizId = "", clients = [], editingId = null;
+const stamp = {}, fresh = (k) => Date.now() - (stamp[k] || 0) < 300000;
 
 function showOnly(id) {
   for (const v of ["loading", "login-view", "app-view"]) $(v).hidden = v !== id;
@@ -215,11 +242,12 @@ function say(id, text, kind) { const el = $(id); el.textContent = text; el.class
 function setBusy(btnId, on, label) { busy = on; const b = $(btnId); b.disabled = on; b.textContent = label; }
 
 function route() {
-  const h = location.hash.slice(1), view = ["configuracion", "clientes", "servicios", "trabajos"].includes(h) ? h : "inicio";
+  const h = location.hash.slice(1), view = ["configuracion", "clientes", "servicios", "trabajos", "agenda"].includes(h) ? h : "inicio";
   document.querySelectorAll("[data-section]").forEach((s) => (s.hidden = s.id !== view));
-  if (view === "clientes" && bizId) loadClients();
-  if (view === "servicios" && bizId) loadServices();
-  if (view === "trabajos" && bizId) loadJobs();
+  if (view === "clientes" && bizId && !fresh("clients")) loadClients();
+  if (view === "servicios" && bizId && !fresh("services")) loadServices();
+  if (view === "trabajos" && bizId && !fresh("jobs")) loadJobs();
+  if (view === "agenda" && bizId) loadAgenda();
   document.querySelectorAll("[data-nav]").forEach((a) => {
     if (a.dataset.nav === view) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   });
@@ -240,7 +268,7 @@ function showLogo() {
 
 onAuthStateChanged(auth, async (user) => {
   window.__ready = true;
-  if (!user) { bizRef = null; showOnly("login-view"); return; }
+  if (!user) { bizRef = null; bizId = ""; clients = []; services = []; jobs = []; for (const k in stamp) delete stamp[k]; cover.length = 0; showOnly("login-view"); return; }
   showOnly("loading");
   try {
     const m = await getDoc(doc(db, "users", user.uid));
@@ -328,7 +356,7 @@ async function loadClients() {
   try {
     const snap = await getDocs(query(collection(db, "clients"), where("businessId", "==", bizId)));
     clients = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    say("cl-msg", ""); renderClients();
+    stamp.clients = Date.now(); say("cl-msg", ""); renderClients();
   } catch (e) { say("cl-msg", "No se pudieron cargar los clientes (" + (e.code || e.message) + ").", "err"); }
 }
 
@@ -361,7 +389,7 @@ $("cl-list").addEventListener("click", async (e) => {
     const c = clients.find((x) => x.id === tg);
     if (!confirm(c.active ? "¿Archivar este cliente? Su historial se conserva." : "¿Reactivar este cliente?")) return;
     busy = true;
-    try { await updateDoc(doc(db, "clients", tg), { active: !c.active, updatedAt: serverTimestamp() }); await loadClients(); }
+    try { await updateDoc(doc(db, "clients", tg), { active: !c.active, updatedAt: serverTimestamp() }); c.active = !c.active; renderClients(); }
     catch (err) { say("cl-msg", "No se pudo actualizar (" + (err.code || err.message) + ").", "err"); }
     finally { busy = false; }
   }
@@ -376,9 +404,9 @@ $("cl-form").addEventListener("submit", async (e) => {
   if (d.email && !EMAIL.test(d.email)) return say("cl-fmsg", "El correo no tiene un formato válido.", "err");
   say("cl-fmsg", ""); setBusy("cl-save", true, "Guardando…");
   try {
-    if (editingId) await updateDoc(doc(db, "clients", editingId), { ...d, updatedAt: serverTimestamp() });
-    else await addDoc(collection(db, "clients"), { ...d, businessId: bizId, active: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
-    $("cl-form").hidden = true; await loadClients(); say("cl-msg", "Cliente guardado.", "ok");
+    if (editingId) { await updateDoc(doc(db, "clients", editingId), { ...d, updatedAt: serverTimestamp() }); Object.assign(clients.find((c) => c.id === editingId), d); }
+    else { const r = await addDoc(collection(db, "clients"), { ...d, businessId: bizId, active: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }); clients.push({ id: r.id, ...d, businessId: bizId, active: true }); }
+    $("cl-form").hidden = true; renderClients(); say("cl-msg", "Cliente guardado.", "ok");
   } catch (err) { say("cl-fmsg", "No se pudo guardar (" + (err.code || err.message) + "). Inténtalo de nuevo.", "err"); }
   finally { setBusy("cl-save", false, "Guardar cliente"); }
 });
@@ -392,7 +420,7 @@ async function loadServices() {
   try {
     const snap = await getDocs(query(collection(db, "services"), where("businessId", "==", bizId)));
     services = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    say("sv-msg", ""); renderServices();
+    stamp.services = Date.now(); say("sv-msg", ""); renderServices();
   } catch (e) { say("sv-msg", "No se pudieron cargar los servicios (" + (e.code || e.message) + ").", "err"); }
 }
 
@@ -422,7 +450,7 @@ $("sv-list").addEventListener("click", async (e) => {
     const s = services.find((x) => x.id === tg);
     if (!confirm(s.active ? "¿Desactivar este servicio? No se borra nada." : "¿Activar este servicio?")) return;
     busy = true;
-    try { await updateDoc(doc(db, "services", tg), { active: !s.active, updatedAt: serverTimestamp() }); await loadServices(); }
+    try { await updateDoc(doc(db, "services", tg), { active: !s.active, updatedAt: serverTimestamp() }); s.active = !s.active; renderServices(); }
     catch (err) { say("sv-msg", "No se pudo actualizar (" + (err.code || err.message) + ").", "err"); }
     finally { busy = false; }
   }
@@ -438,9 +466,9 @@ $("sv-form").addEventListener("submit", async (e) => {
   const defaultPrice = Math.round(n * 100);
   say("sv-fmsg", ""); setBusy("sv-save", true, "Guardando…");
   try {
-    if (editingSvc) await updateDoc(doc(db, "services", editingSvc), { name, description, defaultPrice, updatedAt: serverTimestamp() });
-    else await addDoc(collection(db, "services"), { name, description, defaultPrice, businessId: bizId, active: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
-    $("sv-form").hidden = true; await loadServices(); say("sv-msg", "Servicio guardado.", "ok");
+    if (editingSvc) { await updateDoc(doc(db, "services", editingSvc), { name, description, defaultPrice, updatedAt: serverTimestamp() }); Object.assign(services.find((s) => s.id === editingSvc), { name, description, defaultPrice }); }
+    else { const r = await addDoc(collection(db, "services"), { name, description, defaultPrice, businessId: bizId, active: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }); services.push({ id: r.id, name, description, defaultPrice, businessId: bizId, active: true }); }
+    $("sv-form").hidden = true; renderServices(); say("sv-msg", "Servicio guardado.", "ok");
   } catch (err) { say("sv-fmsg", "No se pudo guardar (" + (err.code || err.message) + "). Inténtalo de nuevo.", "err"); }
   finally { setBusy("sv-save", false, "Guardar servicio"); }
 });
@@ -448,6 +476,7 @@ $("sv-form").addEventListener("submit", async (e) => {
 // ---- Trabajos (Fase 2C) ---- Fechas en hora de República Dominicana (UTC-4, sin horario de verano).
 const STATUS = { solicitud: ["Solicitud", "#e4e7e9", "#444"], pendiente: ["Pendiente de confirmar", "#fdecc8", "#633806"], confirmado: ["Confirmado", "#dcefe3", "#14532d"], en_proceso: ["En proceso", "#d6e6f5", "#12385c"], completado: ["Completado", "#d4efe9", "#0b4a3f"], cancelado: ["Cancelado", "#e4e7e9", "#444"] };
 const TZ = "America/Santo_Domingo";
+const hoursLabel = (m) => +(m / 60).toFixed(2) + " h";
 let jobs = [], editingJob = null;
 const fmtDT = (ts) => ts.toDate().toLocaleString("es-DO", { timeZone: TZ, weekday: "short", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 const toInput = (ts) => new Intl.DateTimeFormat("sv-SE", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ts.toDate()).replace(" ", "T");
@@ -466,10 +495,9 @@ async function loadJobs() {
       const cs = await getDocs(query(collection(db, "clients"), where("businessId", "==", bizId)));
       clients = cs.docs.map((d) => ({ id: d.id, ...d.data() }));
     }
-    const snap = await getDocs(query(collection(db, "jobs"), where("businessId", "==", bizId)));
-    jobs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    say("jb-msg", ""); renderJobs();
-  } catch (e) { say("jb-msg", "No se pudieron cargar los trabajos (" + (e.code || e.message) + ").", "err"); }
+    await ensureRange(new Date(Date.now() - 30 * 864e5), new Date(Date.now() + 90 * 864e5));
+    stamp.jobs = Date.now(); say("jb-msg", ""); renderJobs();
+  } catch (e) { failMsg("jb-msg", e, "los trabajos"); }
 }
 
 function renderJobs() {
@@ -479,7 +507,7 @@ function renderJobs() {
     const [lbl, bg, fg] = STATUS[j.status] || [j.status, "#eee", "#333"];
     const clash = j.status !== "cancelado" && overlaps(j.startAt.toDate(), j.durationMinutes, j.id).length;
     const ml = mapsLink(j);
-    return `<li><div><strong${j.status === "cancelado" ? ' style="text-decoration:line-through"' : ""}>${esc(j.title)}</strong> <span class="badge" style="background:${bg};color:${fg}">${lbl}</span>${clash ? ' <span class="badge" style="background:#fdecc8;color:#633806">Se solapa</span>' : ""}<br>${esc(clientName(j.clientId))} · ${fmtDT(j.startAt)} · ${j.durationMinutes} min<br>${money.format(j.agreedPrice / 100)}${ml ? ` · <a href="${esc(ml)}" target="_blank" rel="noopener">Abrir en Maps</a>` : ""}</div><div><button type="button" class="ghost" data-jedit="${j.id}">Editar</button></div></li>`;
+    return `<li><div><strong${j.status === "cancelado" ? ' style="text-decoration:line-through"' : ""}>${esc(j.title)}</strong> <span class="badge" style="background:${bg};color:${fg}">${lbl}</span>${clash ? ' <span class="badge" style="background:#fdecc8;color:#633806">Se solapa</span>' : ""}<br>${esc(clientName(j.clientId))} · ${fmtDT(j.startAt)} · ${hoursLabel(j.durationMinutes)}<br>${money.format(j.agreedPrice / 100)}${ml ? ` · <a href="${esc(ml)}" target="_blank" rel="noopener">Abrir en Maps</a>` : ""}</div><div><button type="button" class="ghost" data-jedit="${j.id}">Editar</button></div></li>`;
   }).join("") : "<li>No hay trabajos que mostrar.</li>";
 }
 
@@ -490,7 +518,7 @@ function openJob(j) {
   $("j-client").innerHTML = '<option value="">Elige un cliente…</option>' + opts;
   $("j-client").value = j ? j.clientId : "";
   $("j-title").value = j ? j.title : ""; $("j-desc").value = j ? j.description || "" : ""; $("j-address").value = j ? j.address || "" : "";
-  $("j-maps").value = j ? j.mapsUrl || "" : ""; $("j-start").value = j ? toInput(j.startAt) : ""; $("j-dur").value = j ? j.durationMinutes : 60;
+  $("j-maps").value = j ? j.mapsUrl || "" : ""; $("j-start").value = j ? toInput(j.startAt) : ""; $("j-dur").value = j ? +(j.durationMinutes / 60).toFixed(2) : 1;
   $("j-status").value = j ? j.status : "solicitud"; $("j-price").value = j ? (j.agreedPrice / 100).toFixed(2) : ""; $("j-notes").value = j ? j.notes || "" : "";
   say("jb-fmsg", ""); $("jb-form").hidden = false; $("j-client").focus();
 }
@@ -502,29 +530,123 @@ $("jb-list").addEventListener("click", (e) => { const id = e.target.dataset.jedi
 $("jb-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (busy) return;
-  const n = parseFloat($("j-price").value.replace(/,/g, "")), dur = parseInt($("j-dur").value, 10), maps = $("j-maps").value.trim();
+  const n = parseFloat($("j-price").value.replace(/,/g, "")), dur = Math.round(parseFloat($("j-dur").value) * 60), maps = $("j-maps").value.trim();
   const d = { clientId: $("j-client").value, title: $("j-title").value.trim(), description: $("j-desc").value.trim(), address: $("j-address").value.trim(), mapsUrl: maps, durationMinutes: dur, status: $("j-status").value, agreedPrice: Math.round(n * 100), notes: $("j-notes").value.trim() };
   if (!d.clientId) return say("jb-fmsg", "Elige un cliente.", "err");
   if (!d.title) return say("jb-fmsg", "Escribe el título del trabajo.", "err");
   if (!$("j-start").value) return say("jb-fmsg", "Elige la fecha y la hora de inicio.", "err");
   const start = fromInput($("j-start").value);
   if (isNaN(start)) return say("jb-fmsg", "La fecha y la hora no son válidas.", "err");
-  if (!Number.isInteger(dur) || dur <= 0 || dur > 1440) return say("jb-fmsg", "La duración debe ser un número de minutos mayor que 0 (máximo 1440).", "err");
+  if (!Number.isInteger(dur) || dur <= 0 || dur > 1440) return say("jb-fmsg", "La duración debe ser mayor que 0 y de máximo 24 horas.", "err");
   if (!isFinite(n) || n < 0 || n > 1e9) return say("jb-fmsg", "Escribe un precio válido (0 o más).", "err");
   if (maps && !/^https?:\/\//i.test(maps)) return say("jb-fmsg", "El enlace de mapas debe empezar con http:// o https://.", "err");
   if (d.status !== "cancelado") {
+    try { await ensureRange(new Date(start.getTime() - 864e5), new Date(start.getTime() + dur * 60000 + 864e5)); }
+    catch (err) { return say("jb-fmsg", "No se pudo comprobar si hay solapamientos. Revisa tu conexión e inténtalo de nuevo.", "err"); }
     const c = overlaps(start, dur, editingJob);
     if (c.length && !confirm("Este trabajo se solapa con:\n" + c.map((j) => "• " + j.title + " (" + fmtDT(j.startAt) + ")").join("\n") + "\n\n¿Guardar de todos modos?")) return;
   }
   say("jb-fmsg", ""); setBusy("jb-save", true, "Guardando…");
   try {
     const data = { ...d, startAt: Timestamp.fromDate(start) };
-    if (editingJob) await updateDoc(doc(db, "jobs", editingJob), { ...data, updatedAt: serverTimestamp() });
-    else await addDoc(collection(db, "jobs"), { ...data, businessId: bizId, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
-    $("jb-form").hidden = true; await loadJobs(); say("jb-msg", "Trabajo guardado.", "ok");
+    if (editingJob) { await updateDoc(doc(db, "jobs", editingJob), { ...data, updatedAt: serverTimestamp() }); Object.assign(jobs.find((j) => j.id === editingJob), data); }
+    else { const r = await addDoc(collection(db, "jobs"), { ...data, businessId: bizId, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }); jobs.push({ id: r.id, ...data, businessId: bizId }); }
+    $("jb-form").hidden = true; renderJobs(); say("jb-msg", "Trabajo guardado.", "ok");
   } catch (err) { say("jb-fmsg", "No se pudo guardar (" + (err.code || err.message) + "). Inténtalo de nuevo.", "err"); }
   finally { setBusy("jb-save", false, "Guardar trabajo"); }
 });
+
+// ---- Lectura por rangos (menos lecturas) y Agenda (Fase 2D) ----
+const cover = [];
+async function ensureRange(a, b) {
+  const x = a.getTime() - 864e5, y = b.getTime();
+  if (cover.some((c) => c.a <= x && c.b >= y && Date.now() - c.t < 300000)) return;
+  const snap = await getDocs(query(collection(db, "jobs"), where("businessId", "==", bizId), where("startAt", ">=", Timestamp.fromDate(new Date(x))), where("startAt", "<", Timestamp.fromDate(new Date(y)))));
+  for (const d of snap.docs) { const o = { id: d.id, ...d.data() }, i = jobs.findIndex((j) => j.id === o.id); if (i >= 0) jobs[i] = o; else jobs.push(o); }
+  cover.push({ a: x, b: y, t: Date.now() });
+}
+function failMsg(id, e, what) {
+  const u = /https:\/\/\S+/.exec(e.message || "");
+  if (e.code === "failed-precondition" && u) {
+    const el = $(id); el.className = "msg err";
+    el.innerHTML = 'Falta crear un índice en Firebase (se hace una sola vez). <a href="' + esc(u[0]) + '" target="_blank" rel="noopener">Crear índice</a> y vuelve a intentarlo en unos minutos.';
+  } else say(id, "No se pudieron cargar " + what + " (" + (e.code || e.message) + ").", "err");
+}
+
+const DOW = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+const dayKey = (ms) => new Date(ms - 14400000).toISOString().slice(0, 10);
+const dayStart = (k) => Date.parse(k + "T00:00:00-04:00");
+const addDays = (k, n) => new Date(Date.parse(k + "T12:00:00Z") + n * 864e5).toISOString().slice(0, 10);
+const dowIdx = (k) => (new Date(k + "T12:00:00Z").getUTCDay() + 6) % 7;
+const dLabel = (k, o) => new Date(k + "T12:00:00Z").toLocaleDateString("es-DO", { timeZone: "UTC", ...o });
+const timeRD = (ms) => new Date(ms).toLocaleTimeString("es-DO", { timeZone: TZ, hour: "2-digit", minute: "2-digit" });
+const nextMonth = (k) => addDays(k.slice(0, 8) + "01", 31).slice(0, 8) + "01";
+let agView = "dia", agDay = dayKey(Date.now());
+
+function agRange() {
+  if (agView === "dia") return [agDay, addDays(agDay, 1)];
+  if (agView === "semana") { const m = addDays(agDay, -dowIdx(agDay)); return [m, addDays(m, 7)]; }
+  return [agDay.slice(0, 8) + "01", nextMonth(agDay)];
+}
+
+async function loadAgenda() {
+  say("ag-msg", "");
+  try {
+    if (!clients.length) { const cs = await getDocs(query(collection(db, "clients"), where("businessId", "==", bizId))); clients = cs.docs.map((d) => ({ id: d.id, ...d.data() })); }
+    const [a, b] = agRange();
+    await ensureRange(new Date(dayStart(a)), new Date(dayStart(b)));
+  } catch (e) { failMsg("ag-msg", e, "los trabajos de la agenda"); return; }
+  renderAgenda();
+}
+
+function agCard(j, compact) {
+  const [lbl, bg, fg] = STATUS[j.status] || [j.status, "#eee", "#333"], s = j.startAt.toMillis(), x = j.status === "cancelado";
+  const clash = !x && overlaps(j.startAt.toDate(), j.durationMinutes, j.id).length, ml = mapsLink(j);
+  return `<li><div><strong>${timeRD(s)}–${timeRD(s + j.durationMinutes * 60000)}</strong> <span class="badge" style="background:${bg};color:${fg}">${lbl}</span>${clash ? ' <span class="badge" style="background:#fdecc8;color:#633806">Se solapa</span>' : ""}<br><span${x ? ' style="text-decoration:line-through"' : ""}>${esc(j.title)}</span> · ${esc(clientName(j.clientId))}${!compact && j.address ? "<br>" + esc(j.address) : ""}${!compact && ml ? ` · <a href="${esc(ml)}" target="_blank" rel="noopener">Abrir en Maps</a>` : ""}</div>${compact ? "" : `<div><button type="button" class="ghost" data-aedit="${j.id}">Editar</button></div>`}</li>`;
+}
+
+function renderAgenda() {
+  document.querySelectorAll("[data-v]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === agView)));
+  const [a, b] = agRange(), s0 = dayStart(a), e0 = dayStart(b), body = $("ag-body");
+  const list = jobs.filter((j) => j.startAt.toMillis() >= s0 && j.startAt.toMillis() < e0).sort((p, q) => p.startAt.toMillis() - q.startAt.toMillis());
+  if (agView === "dia") {
+    $("ag-label").textContent = dLabel(agDay, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    body.innerHTML = list.length ? `<ul class="list">${list.map((j) => agCard(j, false)).join("")}</ul>` : "<p>No hay instalaciones para esta fecha.</p>";
+  } else if (agView === "semana") {
+    $("ag-label").textContent = dLabel(a, { day: "numeric", month: "short" }) + " – " + dLabel(addDays(b, -1), { day: "numeric", month: "short", year: "numeric" });
+    body.innerHTML = Array.from({ length: 7 }, (_, i) => {
+      const k = addDays(a, i), L = list.filter((j) => dayKey(j.startAt.toMillis()) === k);
+      return `<h2 class="day">${DOW[i]} ${dLabel(k, { day: "numeric", month: "numeric" })}</h2>` + (L.length ? `<ul class="list">${L.map((j) => agCard(j, true)).join("")}</ul>` : '<p class="note">Sin instalaciones.</p>');
+    }).join("");
+  } else {
+    $("ag-label").textContent = dLabel(a, { month: "long", year: "numeric" });
+    const n = Math.round((e0 - s0) / 864e5);
+    let h = DOW.map((d) => `<div class="hdr">${d}</div>`).join("") + "<div></div>".repeat(dowIdx(a));
+    for (let i = 0; i < n; i++) {
+      const k = addDays(a, i), c = list.filter((j) => j.status !== "cancelado" && dayKey(j.startAt.toMillis()) === k).length;
+      h += `<button type="button" data-day="${k}" class="${c ? "has" : ""}" aria-label="Día ${+k.slice(8)}: ${c} trabajos">${+k.slice(8)}${c ? `<br><small>${c} trab.</small>` : ""}</button>`;
+    }
+    body.innerHTML = `<div class="mes">${h}</div>`;
+  }
+}
+
+document.querySelectorAll("[data-v]").forEach((b) => b.addEventListener("click", () => { agView = b.dataset.v; loadAgenda(); }));
+function agStep(dir) {
+  if (agView === "dia") agDay = addDays(agDay, dir);
+  else if (agView === "semana") agDay = addDays(agDay, 7 * dir);
+  else agDay = dir < 0 ? addDays(agDay.slice(0, 8) + "01", -1).slice(0, 8) + "01" : nextMonth(agDay);
+  loadAgenda();
+}
+$("ag-prev").addEventListener("click", () => agStep(-1));
+$("ag-next").addEventListener("click", () => agStep(1));
+$("ag-today").addEventListener("click", () => { agDay = dayKey(Date.now()); loadAgenda(); });
+$("ag-body").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-day],[data-aedit]");
+  if (!t) return;
+  if (t.dataset.day) { agDay = t.dataset.day; agView = "dia"; loadAgenda(); }
+  else { const j = jobs.find((x) => x.id === t.dataset.aedit); location.hash = "#trabajos"; setTimeout(() => openJob(j), 50); }
+});
+$("ag-new").addEventListener("click", () => { const d = agDay; location.hash = "#trabajos"; setTimeout(() => { openJob(null); $("j-start").value = d + "T09:00"; }, 50); });
 </script>
 </body>
 </html>
