@@ -44,6 +44,23 @@ select{width:100%;padding:.6rem;border:1px solid #8a979c;border-radius:6px;font:
 .mes button{margin:0;padding:.5rem 0;background:#fff;color:var(--ink);border:1px solid var(--line);font-weight:400;font-size:.85rem}
 .mes .hdr{font-size:.75rem;color:#556}
 .mes .has{font-weight:700;border-color:var(--brand)}
+.ln{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:.5rem 0;padding:.5rem;border:1px solid var(--line);border-radius:6px}
+.ln [data-f=svc],.ln [data-f=desc]{grid-column:1/3}
+.ln button{margin:0}
+textarea{width:100%;padding:.6rem;border:1px solid #8a979c;border-radius:6px;font:inherit}
+dialog{max-width:520px;width:calc(100% - 2rem);border:1px solid var(--line);border-radius:8px;color:var(--ink)}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:.5rem 0}
+.cardx{border:1px solid var(--line);border-radius:8px;padding:.6rem .75rem}
+.cardx small{display:block;color:#556}
+.cardx strong{font-size:1.1rem}
+#bnav,#more{display:none}
+@media (max-width:640px){.bar nav{display:none}body{padding-bottom:4.5rem}
+#bnav{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--line);padding:.25rem 0 calc(.25rem + env(safe-area-inset-bottom,0px));z-index:5;text-align:center;font-size:.75rem}
+#bnav a,#bnav button{margin:0;padding:.6rem 0;color:#556;background:none;border:0;border-top:3px solid transparent;border-radius:0;font:inherit;text-decoration:none}
+#bnav [aria-current=page]{color:var(--brand);font-weight:700;border-top-color:var(--brand)}
+#more{display:grid;position:fixed;bottom:3.6rem;right:.5rem;background:#fff;border:1px solid var(--line);border-radius:8px;padding:.4rem;z-index:6}
+#more a{padding:.6rem 1rem;color:var(--ink);text-decoration:none}}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -70,7 +87,9 @@ select{width:100%;padding:.6rem;border:1px solid #8a979c;border-radius:6px;font:
       <a href="#agenda" data-nav="agenda">Agenda</a>
       <a href="#clientes" data-nav="clientes">Clientes</a>
       <a href="#trabajos" data-nav="trabajos">Trabajos</a>
+      <a href="#documentos" data-nav="documentos">Documentos</a>
       <a href="#servicios" data-nav="servicios">Servicios</a>
+      <a href="#reportes" data-nav="reportes">Reportes</a>
       <a href="#configuracion" data-nav="configuracion">Configuración</a>
     </nav>
     <button id="logout-btn" type="button" class="ghost">Cerrar sesión</button>
@@ -78,7 +97,9 @@ select{width:100%;padding:.6rem;border:1px solid #8a979c;border-radius:6px;font:
   <main class="card">
     <section id="inicio" data-section>
       <h1>Inicio</h1>
-      <p>Aquí aparecerán tus citas, saldos y cobros cuando se activen los módulos de las próximas fases.</p>
+      <p id="hm-msg" class="msg" role="status"></p>
+      <div id="hm-body"></div>
+      <button id="hm-refresh" type="button" class="ghost">Actualizar</button>
       <p class="note">Los documentos que genere esta aplicación son comerciales y no constituyen comprobante fiscal con NCF.</p>
     </section>
     <section id="clientes" data-section hidden>
@@ -93,8 +114,8 @@ select{width:100%;padding:.6rem;border:1px solid #8a979c;border-radius:6px;font:
         <h2 id="cl-title">Nuevo cliente</h2>
         <label for="c-name">Nombre (obligatorio)</label>
         <input id="c-name" maxlength="120">
-        <label for="c-phone">Teléfono (obligatorio)</label>
-        <input id="c-phone" type="tel" maxlength="40">
+        <label for="c-phone">Teléfono con código de país (obligatorio)</label>
+        <input id="c-phone" type="tel" maxlength="40" placeholder="+1 809 555 0100">
         <label for="c-email">Correo</label>
         <input id="c-email" type="email" maxlength="120">
         <label for="c-address">Dirección habitual</label>
@@ -162,6 +183,65 @@ select{width:100%;padding:.6rem;border:1px solid #8a979c;border-radius:6px;font:
         <p id="jb-fmsg" class="msg" role="alert"></p>
       </form>
     </section>
+    <section id="documentos" data-section hidden>
+      <h1>Cotizaciones y facturas</h1>
+      <p class="note">Documento comercial; no constituye comprobante fiscal con NCF.</p>
+      <p id="dc-msg" class="msg" role="status"></p>
+      <button id="dc-new" type="button">Nueva cotización</button>
+      <button id="dc-new-inv" type="button" class="ghost">Nueva factura directa</button>
+      <ul id="dc-list" class="list"></ul>
+      <form id="dc-form" novalidate hidden>
+        <h2 id="dc-title">Nueva cotización</h2>
+        <label for="d-client">Cliente (obligatorio)</label>
+        <select id="d-client"></select>
+        <label for="d-job">Trabajo asociado (opcional)</label>
+        <select id="d-job"></select>
+        <div id="d-days-wrap"><label for="d-days">Vigencia en días</label>
+        <input id="d-days" type="number" min="1" max="365" step="1" value="15"></div>
+        <h2>Conceptos</h2>
+        <div id="d-lines"></div>
+        <button type="button" id="d-add" class="ghost">Agregar concepto</button>
+        <label for="d-disc">Descuento en RD$ (monto fijo)</label>
+        <input id="d-disc" inputmode="decimal" value="0">
+        <label for="d-notes">Notas o condiciones</label>
+        <input id="d-notes" maxlength="1000">
+        <p id="d-totals" class="msg" aria-live="polite"></p>
+        <button type="submit" id="dc-save">Emitir cotización</button>
+        <button type="button" id="dc-cancel" class="ghost">Cancelar</button>
+        <p id="dc-fmsg" class="msg" role="alert"></p>
+      </form>
+    </section>
+    <section id="cobros" data-section hidden>
+      <h1>Cobros</h1>
+      <p id="pg-msg" class="msg" role="status"></p>
+      <div id="pg-head"></div>
+      <form id="pg-form" novalidate hidden>
+        <h2>Registrar pago</h2>
+        <label for="p-amount">Importe en RD$</label>
+        <input id="p-amount" inputmode="decimal">
+        <label for="p-method">Método</label>
+        <select id="p-method"><option value="efectivo">Efectivo</option><option value="transferencia">Transferencia</option><option value="tarjeta">Tarjeta</option><option value="otro">Otro</option></select>
+        <label for="p-date">Fecha y hora del pago (hora de República Dominicana)</label>
+        <input id="p-date" type="datetime-local">
+        <label for="p-ref">Referencia (opcional)</label>
+        <input id="p-ref" maxlength="120">
+        <button type="submit" id="pg-save">Registrar pago</button>
+        <button type="button" id="pg-cancel" class="ghost">Cancelar</button>
+        <p id="pg-fmsg" class="msg" role="alert"></p>
+      </form>
+      <ul id="pg-list" class="list"></ul>
+    </section>
+    <section id="reportes" data-section hidden>
+      <h1>Reportes</h1>
+      <p class="note">El total cobrado no es ganancia: la app no registra gastos.</p>
+      <label for="r-from">Desde</label>
+      <input id="r-from" type="date">
+      <label for="r-to">Hasta</label>
+      <input id="r-to" type="date">
+      <button id="r-go" type="button">Ver reporte</button>
+      <p id="r-msg" class="msg" role="status"></p>
+      <div id="r-body"></div>
+    </section>
     <section id="servicios" data-section hidden>
       <h1>Catálogo de servicios</h1>
       <p class="note">El precio del catálogo es solo una sugerencia inicial: cambiarlo no modifica trabajos ni documentos ya creados.</p>
@@ -206,7 +286,28 @@ select{width:100%;padding:.6rem;border:1px solid #8a979c;border-radius:6px;font:
       </form>
     </section>
   </main>
+  <nav id="bnav" aria-label="Menú inferior">
+    <a href="#inicio" data-nav="inicio">Inicio</a><a href="#agenda" data-nav="agenda">Agenda</a><a href="#clientes" data-nav="clientes">Clientes</a><a href="#documentos" data-nav="documentos">Documentos</a><button type="button" id="more-btn" aria-expanded="false" aria-controls="more">Más</button>
+  </nav>
+  <div id="more" hidden>
+    <a href="#trabajos" data-nav="trabajos">Trabajos</a><a href="#servicios" data-nav="servicios">Servicios</a><a href="#reportes" data-nav="reportes">Reportes</a><a href="#configuracion" data-nav="configuracion">Configuración</a>
+  </div>
 </div>
+<dialog id="wa-dlg">
+  <form id="wa-form" novalidate>
+    <h2>Enviar por WhatsApp</h2>
+    <label for="wa-phone">Teléfono con código de país</label>
+    <input id="wa-phone" type="tel" placeholder="+1 809 555 0100">
+    <label for="wa-tpl">Mensaje</label>
+    <select id="wa-tpl"></select>
+    <label for="wa-text">Texto (puedes editarlo)</label>
+    <textarea id="wa-text" rows="5" maxlength="1000"></textarea>
+    <p class="note">WhatsApp se abre con el mensaje listo y lo envías tú. Si es un documento, descarga su PDF y adjúntalo tú en el chat.</p>
+    <button type="button" id="wa-open">Abrir WhatsApp</button>
+    <button type="button" id="wa-close" class="ghost">Cerrar</button>
+    <p id="wa-msg" class="msg" role="alert"></p>
+  </form>
+</dialog>
 <script>
 window.__fail=function(m){var l=document.getElementById("loading");if(l&&!window.__ready&&!l.hidden){l.textContent="No se pudo iniciar la aplicación. "+m;}};
 window.addEventListener("error",function(e){window.__fail(e.message||"No se pudo cargar un archivo de Firebase (puede estar bloqueado por la red).");},true);
@@ -216,7 +317,7 @@ setTimeout(function(){window.__fail("Tarda demasiado. Revisa tu conexión o prue
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-import { getFirestore, doc, getDoc, updateDoc, serverTimestamp, collection, addDoc, getDocs, query, where, Timestamp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+import { getFirestore, doc, getDoc, updateDoc, serverTimestamp, collection, addDoc, getDocs, query, where, Timestamp, orderBy, limit, runTransaction } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
 
 // La configuración web de Firebase no es secreta: la seguridad la dan el login y firestore.rules.
 const firebaseConfig = {
@@ -242,12 +343,16 @@ function say(id, text, kind) { const el = $(id); el.textContent = text; el.class
 function setBusy(btnId, on, label) { busy = on; const b = $(btnId); b.disabled = on; b.textContent = label; }
 
 function route() {
-  const h = location.hash.slice(1), view = ["configuracion", "clientes", "servicios", "trabajos", "agenda"].includes(h) ? h : "inicio";
+  const h = location.hash.slice(1), view = ["configuracion", "clientes", "servicios", "trabajos", "agenda", "documentos", "cobros", "reportes"].includes(h) ? h : "inicio";
   document.querySelectorAll("[data-section]").forEach((s) => (s.hidden = s.id !== view));
   if (view === "clientes" && bizId && !fresh("clients")) loadClients();
   if (view === "servicios" && bizId && !fresh("services")) loadServices();
   if (view === "trabajos" && bizId && !fresh("jobs")) loadJobs();
   if (view === "agenda" && bizId) loadAgenda();
+  if (view === "documentos" && bizId && !fresh("docs")) loadDocs();
+  if (view === "cobros" && bizId) loadPayments();
+  if (view === "inicio" && bizId && !fresh("home")) loadHome();
+  if (view === "reportes" && !$("r-from").value) { const t = dayKey(Date.now()); $("r-from").value = t.slice(0, 8) + "01"; $("r-to").value = t; }
   document.querySelectorAll("[data-nav]").forEach((a) => {
     if (a.dataset.nav === view) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   });
@@ -268,7 +373,7 @@ function showLogo() {
 
 onAuthStateChanged(auth, async (user) => {
   window.__ready = true;
-  if (!user) { bizRef = null; bizId = ""; clients = []; services = []; jobs = []; for (const k in stamp) delete stamp[k]; cover.length = 0; showOnly("login-view"); return; }
+  if (!user) { bizRef = null; bizId = ""; clients = []; services = []; jobs = []; for (const k in stamp) delete stamp[k]; cover.length = 0; docs = []; biz = {}; payDoc = null; payments = []; home = null; showOnly("login-view"); return; }
   showOnly("loading");
   try {
     const m = await getDoc(doc(db, "users", user.uid));
@@ -280,7 +385,7 @@ onAuthStateChanged(auth, async (user) => {
     bizId = m.data().businessId; bizRef = doc(db, "businesses", bizId);
     const b = await getDoc(bizRef);
     if (!b.exists()) throw new Error("negocio-no-existe");
-    const d = b.data();
+    const d = b.data(); biz = { name: d.name || "", phone: d.phone || "", email: d.email || "", address: d.address || "" };
     $("biz-title").textContent = d.name || "Instalador";
     $("b-name").value = d.name || ""; $("b-phone").value = d.phone || "";
     $("b-email").value = d.email || ""; $("b-address").value = d.address || "";
@@ -340,7 +445,7 @@ $("biz-form").addEventListener("submit", async (e) => {
   say("biz-msg", ""); setBusy("biz-btn", true, "Guardando…");
   try {
     await updateDoc(bizRef, { ...data, updatedAt: serverTimestamp() });
-    $("biz-title").textContent = data.name;
+    $("biz-title").textContent = data.name; biz = { name: data.name, phone: data.phone, email: data.email, address: data.address };
     say("biz-msg", "Cambios guardados.", "ok");
   } catch (err) { say("biz-msg", "No se pudo guardar (" + (err.code || err.message) + "). Inténtalo de nuevo.", "err"); }
   finally { setBusy("biz-btn", false, "Guardar cambios"); }
@@ -366,7 +471,7 @@ function renderClients() {
     .filter((c) => (arch || c.active) && (!q || c.name.toLowerCase().includes(q) || (dq && digitsOf(c.phone).includes(dq))))
     .sort((a, b) => a.name.localeCompare(b.name, "es"));
   $("cl-list").innerHTML = rows.length
-    ? rows.map((c) => `<li><div><strong>${esc(c.name)}</strong>${c.active ? "" : " <em>(archivado)</em>"}<br>${esc(c.phone)}${c.email ? " · " + esc(c.email) : ""}</div><div><button type="button" class="ghost" data-edit="${c.id}">Editar</button> <button type="button" class="ghost" data-toggle="${c.id}">${c.active ? "Archivar" : "Reactivar"}</button></div></li>`).join("")
+    ? rows.map((c) => `<li><div><strong>${esc(c.name)}</strong>${c.active ? "" : " <em>(archivado)</em>"}<br>${esc(c.phone)}${c.email ? " · " + esc(c.email) : ""}</div><div><button type="button" class="ghost" data-edit="${c.id}">Editar</button> <button type="button" class="ghost" data-wa-c="${c.id}">WhatsApp</button> <button type="button" class="ghost" data-toggle="${c.id}">${c.active ? "Archivar" : "Reactivar"}</button></div></li>`).join("")
     : "<li>No hay clientes que mostrar.</li>";
 }
 
@@ -400,7 +505,7 @@ $("cl-form").addEventListener("submit", async (e) => {
   if (busy) return;
   const d = { name: $("c-name").value.trim(), phone: $("c-phone").value.trim(), email: $("c-email").value.trim(), address: $("c-address").value.trim(), notes: $("c-notes").value.trim() };
   if (!d.name) return say("cl-fmsg", "Escribe el nombre del cliente.", "err");
-  if (digitsOf(d.phone).length < 7) return say("cl-fmsg", "Escribe un teléfono válido (mínimo 7 dígitos).", "err");
+  if (!/^\+\d{7,15}$/.test(d.phone.replace(/[\s().-]/g, ""))) return say("cl-fmsg", "Escribe el teléfono con el código de país, por ejemplo +1 809 555 0100.", "err");
   if (d.email && !EMAIL.test(d.email)) return say("cl-fmsg", "El correo no tiene un formato válido.", "err");
   say("cl-fmsg", ""); setBusy("cl-save", true, "Guardando…");
   try {
@@ -507,7 +612,7 @@ function renderJobs() {
     const [lbl, bg, fg] = STATUS[j.status] || [j.status, "#eee", "#333"];
     const clash = j.status !== "cancelado" && overlaps(j.startAt.toDate(), j.durationMinutes, j.id).length;
     const ml = mapsLink(j);
-    return `<li><div><strong${j.status === "cancelado" ? ' style="text-decoration:line-through"' : ""}>${esc(j.title)}</strong> <span class="badge" style="background:${bg};color:${fg}">${lbl}</span>${clash ? ' <span class="badge" style="background:#fdecc8;color:#633806">Se solapa</span>' : ""}<br>${esc(clientName(j.clientId))} · ${fmtDT(j.startAt)} · ${hoursLabel(j.durationMinutes)}<br>${money.format(j.agreedPrice / 100)}${ml ? ` · <a href="${esc(ml)}" target="_blank" rel="noopener">Abrir en Maps</a>` : ""}</div><div><button type="button" class="ghost" data-jedit="${j.id}">Editar</button></div></li>`;
+    return `<li><div><strong${j.status === "cancelado" ? ' style="text-decoration:line-through"' : ""}>${esc(j.title)}</strong> <span class="badge" style="background:${bg};color:${fg}">${lbl}</span>${clash ? ' <span class="badge" style="background:#fdecc8;color:#633806">Se solapa</span>' : ""}${lateBadge(j)}<br>${esc(clientName(j.clientId))} · ${fmtDT(j.startAt)} · ${hoursLabel(j.durationMinutes)}<br>${money.format(j.agreedPrice / 100)}${ml ? ` · <a href="${esc(ml)}" target="_blank" rel="noopener">Abrir en Maps</a>` : ""}</div><div><button type="button" class="ghost" data-jedit="${j.id}">Editar</button> <button type="button" class="ghost" data-wa-j="${j.id}">WhatsApp</button></div></li>`;
   }).join("") : "<li>No hay trabajos que mostrar.</li>";
 }
 
@@ -551,7 +656,7 @@ $("jb-form").addEventListener("submit", async (e) => {
     const data = { ...d, startAt: Timestamp.fromDate(start) };
     if (editingJob) { await updateDoc(doc(db, "jobs", editingJob), { ...data, updatedAt: serverTimestamp() }); Object.assign(jobs.find((j) => j.id === editingJob), data); }
     else { const r = await addDoc(collection(db, "jobs"), { ...data, businessId: bizId, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }); jobs.push({ id: r.id, ...data, businessId: bizId }); }
-    $("jb-form").hidden = true; renderJobs(); say("jb-msg", "Trabajo guardado.", "ok");
+    stamp.home = 0; $("jb-form").hidden = true; renderJobs(); say("jb-msg", "Trabajo guardado.", "ok");
   } catch (err) { say("jb-fmsg", "No se pudo guardar (" + (err.code || err.message) + "). Inténtalo de nuevo.", "err"); }
   finally { setBusy("jb-save", false, "Guardar trabajo"); }
 });
@@ -602,7 +707,7 @@ async function loadAgenda() {
 function agCard(j, compact) {
   const [lbl, bg, fg] = STATUS[j.status] || [j.status, "#eee", "#333"], s = j.startAt.toMillis(), x = j.status === "cancelado";
   const clash = !x && overlaps(j.startAt.toDate(), j.durationMinutes, j.id).length, ml = mapsLink(j);
-  return `<li><div><strong>${timeRD(s)}–${timeRD(s + j.durationMinutes * 60000)}</strong> <span class="badge" style="background:${bg};color:${fg}">${lbl}</span>${clash ? ' <span class="badge" style="background:#fdecc8;color:#633806">Se solapa</span>' : ""}<br><span${x ? ' style="text-decoration:line-through"' : ""}>${esc(j.title)}</span> · ${esc(clientName(j.clientId))}${!compact && j.address ? "<br>" + esc(j.address) : ""}${!compact && ml ? ` · <a href="${esc(ml)}" target="_blank" rel="noopener">Abrir en Maps</a>` : ""}</div>${compact ? "" : `<div><button type="button" class="ghost" data-aedit="${j.id}">Editar</button></div>`}</li>`;
+  return `<li><div><strong>${timeRD(s)}–${timeRD(s + j.durationMinutes * 60000)}</strong> <span class="badge" style="background:${bg};color:${fg}">${lbl}</span>${clash ? ' <span class="badge" style="background:#fdecc8;color:#633806">Se solapa</span>' : ""}${lateBadge(j)}<br><span${x ? ' style="text-decoration:line-through"' : ""}>${esc(j.title)}</span> · ${esc(clientName(j.clientId))}${!compact && j.address ? "<br>" + esc(j.address) : ""}${!compact && ml ? ` · <a href="${esc(ml)}" target="_blank" rel="noopener">Abrir en Maps</a>` : ""}</div>${compact ? "" : `<div><button type="button" class="ghost" data-aedit="${j.id}">Editar</button> <button type="button" class="ghost" data-wa-j="${j.id}">WhatsApp</button></div>`}</li>`;
 }
 
 function renderAgenda() {
@@ -647,6 +752,437 @@ $("ag-body").addEventListener("click", (e) => {
   else { const j = jobs.find((x) => x.id === t.dataset.aedit); location.hash = "#trabajos"; setTimeout(() => openJob(j), 50); }
 });
 $("ag-new").addEventListener("click", () => { const d = agDay; location.hash = "#trabajos"; setTimeout(() => { openJob(null); $("j-start").value = d + "T09:00"; }, 50); });
+
+// ---- Cotizaciones y PDF (Fase 3A) ---- Importes en centavos enteros.
+let docs = [], qLines = [], biz = {};
+const cents = (n) => Math.round(n * 100);
+const pesos = (c) => "RD$ " + (c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pad = (n) => String(n).padStart(4, "0");
+const fd = (ts) => ts.toDate().toLocaleDateString("es-DO", { timeZone: TZ, day: "2-digit", month: "2-digit", year: "numeric" });
+const DSTAT = { borrador: "Borrador", enviada: "Enviada", aceptada: "Aceptada", rechazada: "Rechazada" };
+const lateBadge = (j) => !["completado", "cancelado"].includes(j.status) && j.startAt.toMillis() + j.durationMinutes * 60000 < Date.now() ? ' <span class="badge" style="background:#fde2e2;color:#7a1212">Pasó la fecha sin cerrar</span>' : "";
+
+async function loadDocs() {
+  say("dc-msg", "Cargando cotizaciones…");
+  try {
+    if (!clients.length) { const cs = await getDocs(query(collection(db, "clients"), where("businessId", "==", bizId))); clients = cs.docs.map((d) => ({ id: d.id, ...d.data() })); }
+    if (!services.length) { const ss = await getDocs(query(collection(db, "services"), where("businessId", "==", bizId))); services = ss.docs.map((d) => ({ id: d.id, ...d.data() })); }
+    const snap = await getDocs(query(collection(db, "documents"), where("businessId", "==", bizId), orderBy("issuedAt", "desc"), limit(30)));
+    docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    stamp.docs = Date.now(); say("dc-msg", ""); renderDocs();
+  } catch (e) { failMsg("dc-msg", e, "las cotizaciones"); }
+}
+
+function renderDocs() {
+  const inv = new Set(docs.filter((x) => x.type === "factura" && x.sourceDocumentId).map((x) => x.sourceDocumentId));
+  $("dc-list").innerHTML = docs.length ? docs.map((d) => {
+    const q = d.type === "cotizacion", f = d.type === "factura", venc = q && ["borrador", "enviada"].includes(d.status) && d.validUntil.toMillis() < Date.now();
+    const lbl = q ? DSTAT[d.status] || d.status : d.status === "anulada" ? "Anulada" : "Emitida", tipo = q ? "Cotización" : f ? "Factura" : "Recibo";
+    const btn = (a, t) => `<button type="button" class="ghost" data-act="${a}" data-id="${d.id}">${t}</button>`;
+    let acts = `<button type="button" class="ghost" data-pdf="${d.id}">PDF</button> <button type="button" class="ghost" data-wa-d="${d.id}">WhatsApp</button>`;
+    if (q && d.status === "borrador") acts += btn("enviada", "Marcar enviada");
+    if (q && ["borrador", "enviada"].includes(d.status)) acts += btn("aceptada", "Aceptar") + btn("rechazada", "Rechazar");
+    if (q && d.status === "aceptada" && !inv.has(d.id)) acts += btn("invoice", "Convertir a factura");
+    if (f && d.status === "emitida") acts += btn("cobros", "Cobros") + (paidOf(d) === 0 ? btn("void", "Anular") : "");
+    const pago = f && d.status === "emitida" ? `<br>Pagado ${pesos(paidOf(d))} · Saldo ${pesos(d.total - paidOf(d))} · ${payState(d)}` : "";
+    return `<li><div><strong>${esc(d.number)}</strong> <span class="badge" style="background:#e4e7e9;color:#333">${tipo} · ${lbl}</span>${venc ? ' <span class="badge" style="background:#fdecc8;color:#633806">Vencida</span>' : ""}${q && inv.has(d.id) ? ' <span class="badge" style="background:#d4efe9;color:#0b4a3f">Facturada</span>' : ""}<br>${esc(d.clientSnapshot.name)} · ${fd(d.issuedAt)}${q ? " · válida hasta " + fd(d.validUntil) : ""}<br>Total ${pesos(d.total)}${pago}${d.voidReason ? "<br>Motivo de anulación: " + esc(d.voidReason) : ""}</div><div>${acts}</div></li>`;
+  }).join("") + (docs.length >= 30 ? '<li class="note">Se muestran los 30 más recientes.</li>' : "") : "<li>No hay documentos todavía.</li>";
+}
+
+function renderLines() {
+  const so = services.filter((s) => s.active).map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join("");
+  $("d-lines").innerHTML = qLines.map((l, i) => `<div class="ln" data-i="${i}"><select data-f="svc" aria-label="Servicio del catálogo"><option value="">Del catálogo…</option>${so}</select><input data-f="desc" placeholder="Descripción" maxlength="200" value="${esc(l.desc)}"><input data-f="qty" inputmode="decimal" aria-label="Cantidad" value="${esc(l.qty)}"><input data-f="price" inputmode="decimal" aria-label="Precio unitario en RD$" placeholder="Precio RD$" value="${esc(l.price)}"><button type="button" class="ghost" data-rm="${i}">Quitar</button></div>`).join("");
+  showTotals();
+}
+
+function calc() {
+  const items = []; let err = "";
+  for (const l of qLines) {
+    if (!l.desc.trim() && !String(l.price).trim()) continue;
+    const q = parseFloat(String(l.qty).replace(/,/g, "")), p = parseFloat(String(l.price).replace(/,/g, ""));
+    if (!l.desc.trim()) err = "Cada concepto necesita descripción.";
+    else if (!isFinite(q) || q <= 0 || q > 100000) err = "La cantidad debe ser mayor que 0.";
+    else if (!isFinite(p) || p < 0 || p > 1e9) err = "El precio de cada concepto debe ser 0 o más.";
+    else items.push({ description: l.desc.trim().slice(0, 200), quantity: q, unitPrice: cents(p), lineTotal: Math.round(cents(p) * q) });
+  }
+  const subtotal = items.reduce((s, i) => s + i.lineTotal, 0), dn = parseFloat(String($("d-disc").value || "0").replace(/,/g, "")), discount = cents(dn);
+  if (!err && !items.length) err = "Agrega al menos un concepto.";
+  if (!err && (!isFinite(dn) || dn < 0)) err = "El descuento debe ser 0 o más.";
+  if (!err && discount > subtotal) err = "El descuento no puede superar el subtotal.";
+  return { items, subtotal, discount, total: subtotal - discount, err };
+}
+function showTotals() { const c = calc(); $("d-totals").textContent = "Subtotal " + pesos(c.subtotal) + " · Descuento " + pesos(isFinite(c.discount) ? c.discount : 0) + " · Total " + pesos(isFinite(c.total) ? c.total : 0); }
+
+let docType = "cotizacion";
+function openDoc(type) {
+  docType = type;
+  $("dc-title").textContent = type === "factura" ? "Nueva factura directa" : "Nueva cotización"; $("d-days-wrap").hidden = type === "factura"; $("dc-save").textContent = type === "factura" ? "Emitir factura" : "Emitir cotización";
+  const act = clients.filter((c) => c.active).sort((a, b) => a.name.localeCompare(b.name, "es"));
+  $("d-client").innerHTML = '<option value="">Elige un cliente…</option>' + act.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+  $("d-job").innerHTML = '<option value="">Sin trabajo asociado</option>';
+  $("d-days").value = 15; $("d-disc").value = "0"; $("d-notes").value = "";
+  qLines = [{ svc: "", desc: "", qty: "1", price: "" }]; renderLines();
+  say("dc-fmsg", ""); $("dc-form").hidden = false; $("d-client").focus();
+}
+$("dc-new").addEventListener("click", () => openDoc("cotizacion"));
+$("dc-new-inv").addEventListener("click", () => openDoc("factura"));
+$("dc-cancel").addEventListener("click", () => { $("dc-form").hidden = true; });
+$("d-add").addEventListener("click", () => { qLines.push({ svc: "", desc: "", qty: "1", price: "" }); renderLines(); });
+$("d-disc").addEventListener("input", showTotals);
+$("d-client").addEventListener("change", () => {
+  const mine = jobs.filter((j) => j.clientId === $("d-client").value && j.status !== "cancelado").sort((a, b) => b.startAt.toMillis() - a.startAt.toMillis());
+  $("d-job").innerHTML = '<option value="">Sin trabajo asociado</option>' + mine.map((j) => `<option value="${j.id}">${esc(j.title)} (${fmtDT(j.startAt)})</option>`).join("");
+});
+$("d-lines").addEventListener("input", (e) => { const i = e.target.closest(".ln")?.dataset.i, f = e.target.dataset.f; if (i === undefined || !f || f === "svc") return; qLines[i][f] = e.target.value; showTotals(); });
+$("d-lines").addEventListener("change", (e) => {
+  const i = e.target.closest(".ln")?.dataset.i;
+  if (i === undefined || e.target.dataset.f !== "svc") return;
+  const s = services.find((x) => x.id === e.target.value);
+  if (s) { qLines[i].desc = s.name; qLines[i].price = (s.defaultPrice / 100).toFixed(2); renderLines(); }
+});
+$("d-lines").addEventListener("click", (e) => { const r = e.target.dataset.rm; if (r === undefined) return; qLines.splice(+r, 1); if (!qLines.length) qLines.push({ svc: "", desc: "", qty: "1", price: "" }); renderLines(); });
+
+$("dc-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (busy) return;
+  const clientId = $("d-client").value, c = calc(), days = parseInt($("d-days").value, 10), type = docType;
+  if (!clientId) return say("dc-fmsg", "Elige un cliente.", "err");
+  if (c.err) return say("dc-fmsg", c.err, "err");
+  if (type === "cotizacion" && (!Number.isInteger(days) || days < 1 || days > 365)) return say("dc-fmsg", "La vigencia debe estar entre 1 y 365 días.", "err");
+  const cl = clients.find((x) => x.id === clientId), notes = $("d-notes").value.trim(), jobId = $("d-job").value;
+  say("dc-fmsg", ""); setBusy("dc-save", true, "Emitiendo…");
+  try {
+    const cRef = doc(db, "documentCounters", bizId + "_" + type), validUntil = Timestamp.fromDate(new Date(Date.now() + days * 864e5));
+    const data = { businessId: bizId, clientId, jobId, type, ...(type === "cotizacion" ? { validUntil } : {}), sourceDocumentId: "", items: c.items, subtotal: c.subtotal, discount: c.discount, total: c.total, status: type === "factura" ? "emitida" : "borrador", businessSnapshot: { name: biz.name || "", phone: biz.phone || "", email: biz.email || "", address: biz.address || "" }, clientSnapshot: { name: cl.name, phone: cl.phone, email: cl.email || "", address: cl.address || "" }, notes };
+    let number, id, seq;
+    await runTransaction(db, async (tx) => {
+      const cs = await tx.get(cRef);
+      seq = (cs.exists() ? cs.data().last : 0) + 1; number = (type === "factura" ? "FAC-" : "COT-") + pad(seq); id = bizId + "_" + number;
+      if (cs.exists()) tx.update(cRef, { last: seq, updatedAt: serverTimestamp() });
+      else tx.set(cRef, { businessId: bizId, type, last: seq, updatedAt: serverTimestamp() });
+      tx.set(doc(db, "documents", id), { ...data, number, seq, issuedAt: serverTimestamp(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    });
+    docs.unshift({ id, ...data, number, seq, issuedAt: Timestamp.now() });
+    stamp.home = 0; $("dc-form").hidden = true; renderDocs(); say("dc-msg", (type === "factura" ? "Factura " : "Cotización ") + number + " emitida.", "ok");
+  } catch (err) { say("dc-fmsg", "No se pudo emitir (" + (err.code || err.message) + "). Inténtalo de nuevo.", "err"); }
+  finally { setBusy("dc-save", false, type === "factura" ? "Emitir factura" : "Emitir cotización"); }
+});
+
+async function makePdf(d) {
+  if (!window.jspdf) await new Promise((ok, no) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"; s.integrity = "sha384-qovJwSBbRDPP5cEjCp8S0UP66wrvnjaa60XMOGzTNanrThcrGfXfnZkvgY8N1KT3"; s.crossOrigin = "anonymous";
+    s.onload = ok; s.onerror = () => no(new Error("no se pudo cargar la librería de PDF")); document.head.appendChild(s);
+  });
+  const pdf = new window.jspdf.jsPDF({ unit: "mm", format: "a4" }), M = 15, R = 195, b = d.businessSnapshot, k = d.clientSnapshot;
+  let y = 20, lx = M;
+  if (logo) { try { const im = new Image(); await new Promise((o, n) => { im.onload = o; im.onerror = n; im.src = logo; }); const h = 20, w = h * im.width / im.height; pdf.addImage(logo, logo.startsWith("data:image/png") ? "PNG" : "JPEG", M, y - 5, w, h); lx = M + w + 4; } catch (e) { /* sin logo */ } }
+  pdf.setFont("helvetica", "bold").setFontSize(14).text(b.name || "", lx, y);
+  pdf.setFont("helvetica", "normal").setFontSize(9);
+  [b.phone, b.email, b.address].filter(Boolean).forEach((t, i) => pdf.text(t, lx, y + 5 + i * 4.5));
+  pdf.setFont("helvetica", "bold").setFontSize(16).text(d.type === "recibo" ? "RECIBO DE PAGO" + (d.status === "anulada" ? " (ANULADO)" : "") : d.type === "factura" ? "FACTURA COMERCIAL" + (d.status === "anulada" ? " (ANULADA)" : "") : "COTIZACIÓN", R, y, { align: "right" });
+  pdf.setFontSize(10).text(d.number, R, y + 6, { align: "right" });
+  pdf.setFont("helvetica", "normal").text("Fecha: " + fd(d.issuedAt), R, y + 11, { align: "right" });
+  if (d.validUntil) pdf.text("Válida hasta: " + fd(d.validUntil), R, y + 16, { align: "right" });
+  y += 32;
+  pdf.setFont("helvetica", "bold").text("Cliente", M, y); pdf.setFont("helvetica", "normal");
+  [k.name, k.phone, k.email, k.address].filter(Boolean).forEach((t, i) => pdf.text(t, M, y + 5 + i * 4.5));
+  y += 30;
+  const head = () => { pdf.setFont("helvetica", "bold").setFontSize(9); pdf.text("Descripción", M, y); pdf.text("Cant.", 120, y, { align: "right" }); pdf.text("Precio", 160, y, { align: "right" }); pdf.text("Total", R, y, { align: "right" }); pdf.line(M, y + 1.5, R, y + 1.5); pdf.setFont("helvetica", "normal"); y += 6; };
+  head();
+  for (const it of d.items) {
+    const lines = pdf.splitTextToSize(it.description, 95);
+    if (y + lines.length * 4.5 > 265) { pdf.addPage(); y = 20; head(); }
+    pdf.text(lines, M, y); pdf.text(String(it.quantity), 120, y, { align: "right" }); pdf.text(pesos(it.unitPrice), 160, y, { align: "right" }); pdf.text(pesos(it.lineTotal), R, y, { align: "right" });
+    y += lines.length * 4.5 + 2;
+  }
+  if (y > 240) { pdf.addPage(); y = 20; }
+  y += 4; pdf.line(120, y - 3, R, y - 3);
+  pdf.text("Subtotal", 160, y, { align: "right" }); pdf.text(pesos(d.subtotal), R, y, { align: "right" });
+  pdf.text("Descuento", 160, y + 5, { align: "right" }); pdf.text(pesos(d.discount), R, y + 5, { align: "right" });
+  pdf.setFont("helvetica", "bold").setFontSize(11); pdf.text("Total", 160, y + 11, { align: "right" }); pdf.text(pesos(d.total), R, y + 11, { align: "right" });
+  pdf.setFont("helvetica", "normal").setFontSize(9); y += 20;
+  if (d.notes) { pdf.setFont("helvetica", "bold").text("Notas y condiciones", M, y); pdf.setFont("helvetica", "normal"); pdf.text(pdf.splitTextToSize(d.notes, 180), M, y + 5); }
+  const n = pdf.getNumberOfPages();
+  for (let i = 1; i <= n; i++) { pdf.setPage(i); pdf.setFontSize(8); pdf.text("Documento comercial; no constituye comprobante fiscal con NCF", 105, 287, { align: "center" }); pdf.text("Página " + i + " de " + n, R, 287, { align: "right" }); }
+  pdf.save(d.number + ".pdf");
+}
+$("dc-list").addEventListener("click", async (e) => {
+  const id = e.target.dataset.pdf;
+  if (!id || busy) return;
+  busy = true; e.target.disabled = true;
+  try { await makePdf(docs.find((d) => d.id === id)); } catch (err) { say("dc-msg", "No se pudo crear el PDF (" + err.message + ").", "err"); }
+  finally { busy = false; e.target.disabled = false; }
+});
+
+// ---- Aceptar/rechazar, factura y anulación (Fase 3B) ----
+async function toInvoice(q) {
+  if (docs.some((x) => x.sourceDocumentId === q.id)) throw new Error("ya-facturada");
+  const cRef = doc(db, "documentCounters", bizId + "_factura"), id = bizId + "_FAC-DE-" + q.id, cl = clients.find((c) => c.id === q.clientId) || q.clientSnapshot;
+  const data = { businessId: bizId, clientId: q.clientId, jobId: q.jobId || "", type: "factura", items: q.items, subtotal: q.subtotal, discount: q.discount, total: q.total, status: "emitida", businessSnapshot: { name: biz.name || "", phone: biz.phone || "", email: biz.email || "", address: biz.address || "" }, clientSnapshot: { name: cl.name, phone: cl.phone, email: cl.email || "", address: cl.address || "" }, notes: q.notes || "", sourceDocumentId: q.id };
+  let number, seq;
+  await runTransaction(db, async (tx) => {
+    const cs = await tx.get(cRef);
+    seq = (cs.exists() ? cs.data().last : 0) + 1; number = "FAC-" + pad(seq);
+    if (cs.exists()) tx.update(cRef, { last: seq, updatedAt: serverTimestamp() });
+    else tx.set(cRef, { businessId: bizId, type: "factura", last: seq, updatedAt: serverTimestamp() });
+    tx.set(doc(db, "documents", id), { ...data, number, seq, issuedAt: serverTimestamp(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+  });
+  docs.unshift({ id, ...data, number, seq, issuedAt: Timestamp.now() });
+  return number;
+}
+$("dc-list").addEventListener("click", async (e) => {
+  const a = e.target.dataset.act, d = docs.find((x) => x.id === e.target.dataset.id);
+  if (!a || !d || busy) return;
+  if (a === "cobros") { payDoc = d; location.hash = "#cobros"; return; }
+  if (a === "void" && paidOf(d) > 0) return say("dc-msg", "No se puede anular una factura con pagos válidos. Anula primero los pagos.", "err");
+  let reason = "";
+  if (a === "void") {
+    reason = (prompt("Motivo de la anulación (mínimo 5 caracteres):") || "").trim();
+    if (reason.length < 5) return say("dc-msg", "La anulación necesita un motivo de al menos 5 caracteres.", "err");
+    if (!confirm("¿Anular " + d.number + "? El documento se conserva marcado como anulado.")) return;
+  } else {
+    const t = { enviada: "¿Marcar como enviada?", aceptada: "¿Marcar como aceptada?", rechazada: "¿Marcar como rechazada? Ya no podrá cambiarse.", invoice: "¿Convertir esta cotización en factura comercial? Se emite una sola vez." }[a];
+    if (!confirm(t)) return;
+    if (a === "aceptada" && d.validUntil.toMillis() < Date.now() && !confirm("Esta cotización ya venció. ¿Aceptarla de todos modos?")) return;
+  }
+  busy = true; e.target.disabled = true; say("dc-msg", "");
+  try {
+    if (a === "invoice") { const n = await toInvoice(d); say("dc-msg", "Factura " + n + " emitida.", "ok"); }
+    else if (a === "void") { await updateDoc(doc(db, "documents", d.id), { status: "anulada", voidReason: reason, voidedAt: serverTimestamp(), updatedAt: serverTimestamp() }); d.status = "anulada"; d.voidReason = reason; say("dc-msg", d.number + " anulada.", "ok"); }
+    else { await updateDoc(doc(db, "documents", d.id), { status: a, updatedAt: serverTimestamp() }); d.status = a; say("dc-msg", "Estado actualizado.", "ok"); }
+  } catch (err) {
+    say("dc-msg", err.message === "ya-facturada" ? "Esa cotización ya tiene una factura." : "No se pudo completar (" + (err.code || err.message) + "). Si estabas convirtiendo, puede que ya exista la factura.", "err");
+  } finally { stamp.home = 0; busy = false; renderDocs(); }
+});
+
+// ---- Pagos, saldos y recibos (Fase 4A) ---- El saldo se guarda en la factura (paidTotal) y se mantiene en la misma transacción que cada pago.
+let payDoc = null, payments = [];
+const METHODS = { efectivo: "Efectivo", transferencia: "Transferencia", tarjeta: "Tarjeta", otro: "Otro" };
+const paidOf = (d) => d.paidTotal || 0;
+const payState = (d) => (paidOf(d) === 0 ? "Pendiente" : paidOf(d) < d.total ? "Parcial" : "Pagada");
+
+async function loadPayments() {
+  if (!payDoc) { $("pg-head").innerHTML = "<p>Elige una factura en Documentos y pulsa Cobros.</p>"; $("pg-list").innerHTML = ""; $("pg-form").hidden = true; return; }
+  say("pg-msg", "Cargando pagos…");
+  try {
+    const is = await getDoc(doc(db, "documents", payDoc.id)); if (is.exists()) Object.assign(payDoc, is.data());
+    const snap = await getDocs(query(collection(db, "payments"), where("businessId", "==", bizId), where("documentId", "==", payDoc.id)));
+    payments = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => b.paidAt.toMillis() - a.paidAt.toMillis());
+    say("pg-msg", ""); renderPayments();
+  } catch (e) { say("pg-msg", "No se pudieron cargar los pagos (" + (e.code || e.message) + ").", "err"); }
+}
+function renderPayments() {
+  const d = payDoc, saldo = d.total - paidOf(d);
+  $("pg-head").innerHTML = `<p><strong>${esc(d.number)}</strong> · ${esc(d.clientSnapshot.name)}<br>Total ${pesos(d.total)} · Pagado ${pesos(paidOf(d))} · Saldo ${pesos(saldo)} · ${d.status === "anulada" ? "Factura anulada" : payState(d)}</p>${d.status === "emitida" ? `<button type="button" id="pg-new"${saldo <= 0 ? " disabled" : ""}>Registrar pago</button> <button type="button" id="pg-recalc" class="ghost">Recalcular saldo</button>` : ""}`;
+  $("pg-list").innerHTML = payments.length ? payments.map((p) => `<li><div><strong>${pesos(p.amount)}</strong> · ${METHODS[p.method]} · ${fmtDT(p.paidAt)}${p.reference ? " · Ref. " + esc(p.reference) : ""}<br>${p.status === "valid" ? "Válido" : "Anulado: " + esc(p.voidReason || "")}</div><div><button type="button" class="ghost" data-rec="${p.id}">Recibo PDF</button>${p.status === "valid" ? ` <button type="button" class="ghost" data-pvoid="${p.id}">Anular pago</button>` : ""}</div></li>`).join("") : "<li>Todavía no hay pagos.</li>";
+}
+$("pg-cancel").addEventListener("click", () => { $("pg-form").hidden = true; });
+$("pg-head").addEventListener("click", async (e) => {
+  if (e.target.id === "pg-new") { $("p-amount").value = ""; $("p-ref").value = ""; $("p-method").value = "efectivo"; $("p-date").value = toInput(Timestamp.now()); say("pg-fmsg", ""); $("pg-form").hidden = false; $("p-amount").focus(); }
+  if (e.target.id === "pg-recalc" && !busy) {
+    busy = true;
+    try {
+      const sum = payments.filter((p) => p.status === "valid").reduce((s, p) => s + p.amount, 0);
+      if (sum === paidOf(payDoc)) say("pg-msg", "El saldo es correcto: coincide con la suma de los pagos válidos.", "ok");
+      else { await updateDoc(doc(db, "documents", payDoc.id), { paidTotal: sum, updatedAt: serverTimestamp() }); payDoc.paidTotal = sum; say("pg-msg", "Saldo corregido a partir de los pagos válidos.", "ok"); }
+    } catch (err) { say("pg-msg", "No se pudo recalcular (" + (err.code || err.message) + ").", "err"); }
+    finally { busy = false; renderPayments(); }
+  }
+});
+
+$("pg-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (busy) return;
+  const d = payDoc, n = parseFloat($("p-amount").value.replace(/,/g, "")), amount = cents(n), saldo = d.total - paidOf(d);
+  if (!isFinite(n) || amount <= 0) return say("pg-fmsg", "El importe debe ser mayor que 0.", "err");
+  if (amount > saldo) return say("pg-fmsg", "El pago no puede superar el saldo (" + pesos(saldo) + ").", "err");
+  if (!$("p-date").value) return say("pg-fmsg", "Elige la fecha y la hora del pago.", "err");
+  const when = fromInput($("p-date").value);
+  if (isNaN(when) || when.getTime() > Date.now() + 60000) return say("pg-fmsg", "La fecha del pago no puede ser futura.", "err");
+  const method = $("p-method").value, reference = $("p-ref").value.trim();
+  say("pg-fmsg", ""); setBusy("pg-save", true, "Registrando…");
+  try {
+    const cRef = doc(db, "documentCounters", bizId + "_recibo"), invRef = doc(db, "documents", d.id), pRef = doc(collection(db, "payments"));
+    let number, seq, paid, rid;
+    const cl = clients.find((c) => c.id === d.clientId) || d.clientSnapshot, paidAt = Timestamp.fromDate(when);
+    await runTransaction(db, async (tx) => {
+      const is = await tx.get(invRef), cs = await tx.get(cRef), cur = is.data();
+      paid = cur.paidTotal || 0;
+      if (cur.status !== "emitida") throw new Error("factura-no-vigente");
+      if (amount > cur.total - paid) throw new Error("excede-saldo");
+      seq = (cs.exists() ? cs.data().last : 0) + 1; number = "REC-" + pad(seq); rid = bizId + "_" + number;
+      if (cs.exists()) tx.update(cRef, { last: seq, updatedAt: serverTimestamp() });
+      else tx.set(cRef, { businessId: bizId, type: "recibo", last: seq, updatedAt: serverTimestamp() });
+      tx.set(pRef, { businessId: bizId, documentId: d.id, clientId: d.clientId, receiptId: rid, amount, paidAt, method, reference, status: "valid", createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      tx.update(invRef, { paidTotal: paid + amount, updatedAt: serverTimestamp() });
+      tx.set(doc(db, "documents", rid), { businessId: bizId, clientId: d.clientId, jobId: d.jobId || "", type: "recibo", number, seq, paymentId: pRef.id, sourceDocumentId: d.id, issuedAt: serverTimestamp(), items: [{ description: "Pago de la factura " + d.number, quantity: 1, unitPrice: amount, lineTotal: amount }], subtotal: amount, discount: 0, total: amount, status: "emitida", businessSnapshot: { name: biz.name || "", phone: biz.phone || "", email: biz.email || "", address: biz.address || "" }, clientSnapshot: { name: cl.name, phone: cl.phone, email: cl.email || "", address: cl.address || "" }, notes: "Fecha del pago: " + fd({ toDate: () => when }) + ". Método: " + METHODS[method] + (reference ? ". Referencia: " + reference : "") + ".", createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    });
+    d.paidTotal = paid + amount;
+    payments.unshift({ id: pRef.id, businessId: bizId, documentId: d.id, receiptId: rid, amount, paidAt, method, reference, status: "valid" });
+    stamp.home = 0; $("pg-form").hidden = true; renderPayments(); say("pg-msg", "Pago registrado. Recibo " + number + " emitido.", "ok");
+  } catch (err) { say("pg-fmsg", err.message === "excede-saldo" ? "El saldo cambió y el pago ya lo supera. Recarga la página." : "No se pudo registrar (" + (err.code || err.message) + "). Inténtalo de nuevo.", "err"); }
+  finally { setBusy("pg-save", false, "Registrar pago"); }
+});
+
+$("pg-list").addEventListener("click", async (e) => {
+  if (busy) return;
+  const rid = e.target.dataset.rec, vid = e.target.dataset.pvoid;
+  if (rid) {
+    busy = true; e.target.disabled = true;
+    try { const p = payments.find((x) => x.id === rid), rs = await getDoc(doc(db, "documents", p.receiptId)); await makePdf({ id: rs.id, ...rs.data() }); }
+    catch (err) { say("pg-msg", "No se pudo crear el recibo (" + (err.code || err.message) + ").", "err"); }
+    finally { busy = false; e.target.disabled = false; }
+  }
+  if (vid) {
+    const p = payments.find((x) => x.id === vid), reason = (prompt("Motivo de la anulación del pago (mínimo 5 caracteres):") || "").trim();
+    if (reason.length < 5) return say("pg-msg", "La anulación necesita un motivo de al menos 5 caracteres.", "err");
+    if (!confirm("¿Anular el pago de " + pesos(p.amount) + "? Se conserva en el historial y su recibo queda anulado.")) return;
+    busy = true; say("pg-msg", "");
+    try {
+      const pRef = doc(db, "payments", p.id), invRef = doc(db, "documents", payDoc.id);
+      let paid;
+      await runTransaction(db, async (tx) => {
+        const ps = await tx.get(pRef), is = await tx.get(invRef);
+        if (ps.data().status !== "valid") throw new Error("ya-anulado");
+        paid = (is.data().paidTotal || 0) - p.amount;
+        tx.update(pRef, { status: "void", voidReason: reason, updatedAt: serverTimestamp() });
+        tx.update(invRef, { paidTotal: paid, updatedAt: serverTimestamp() });
+        tx.update(doc(db, "documents", p.receiptId), { status: "anulada", voidReason: reason, voidedAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      });
+      payDoc.paidTotal = paid; p.status = "void"; p.voidReason = reason;
+      const rc = docs.find((x) => x.id === p.receiptId); if (rc) { rc.status = "anulada"; rc.voidReason = reason; }
+      stamp.home = 0; say("pg-msg", "Pago anulado. El saldo se actualizó.", "ok");
+    } catch (err) { say("pg-msg", "No se pudo anular el pago (" + (err.code || err.message) + ").", "err"); }
+    finally { busy = false; renderPayments(); }
+  }
+});
+
+// ---- WhatsApp manual (Fase 4B) ---- Solo abre wa.me con el texto; la app no sabe si el mensaje se envió.
+const PHONE = /^\+\d{7,15}$/;
+const cleanPhone = (s) => String(s).replace(/[\s().-]/g, "");
+const waUrl = (phone, text) => "https://wa.me/" + phone.slice(1) + (text ? "?text=" + encodeURIComponent(text) : "");
+const WA_LBL = { confirmacion: "Confirmación de cita", recordatorio: "Recordatorio de cita", cotizacion: "Envío de cotización", factura: "Envío de factura comercial", recibo: "Envío de recibo", gracias: "Agradecimiento", libre: "Mensaje libre" };
+let waCtx = null;
+function waText(k) {
+  const { client: c, job: j, doc: x } = waCtx, n = c.name, b = biz.name || "";
+  const T = {
+    confirmacion: () => `Hola ${n}, le confirmo su instalación "${j.title}" el ${fmtDT(j.startAt)}. ${b}`,
+    recordatorio: () => `Hola ${n}, le recuerdo su instalación "${j.title}" programada para el ${fmtDT(j.startAt)}. ${b}`,
+    cotizacion: () => `Hola ${n}, le envío la cotización ${x.number} por ${pesos(x.total)}, válida hasta ${fd(x.validUntil)}. ${b}`,
+    factura: () => `Hola ${n}, le envío la factura comercial ${x.number} por ${pesos(x.total)}. Saldo pendiente: ${pesos(x.total - paidOf(x))}. ${b}`,
+    recibo: () => `Hola ${n}, le envío el recibo ${x.number} por ${pesos(x.total)}. Gracias por su pago. ${b}`,
+    gracias: () => `Hola ${n}, gracias por confiar en ${b}. Quedamos a su orden.`,
+    libre: () => ""
+  };
+  return T[k]();
+}
+function openWa(ctx) {
+  waCtx = ctx;
+  $("wa-phone").value = ctx.client.phone || "";
+  $("wa-tpl").innerHTML = ctx.keys.map((k) => `<option value="${k}">${WA_LBL[k]}</option>`).join("");
+  $("wa-text").value = waText(ctx.keys[0]); say("wa-msg", ""); $("wa-dlg").showModal();
+}
+$("wa-tpl").addEventListener("change", () => { $("wa-text").value = waText($("wa-tpl").value); });
+$("wa-close").addEventListener("click", () => $("wa-dlg").close());
+$("wa-open").addEventListener("click", async () => {
+  const p = cleanPhone($("wa-phone").value);
+  if (!PHONE.test(p)) return say("wa-msg", "Escribe el teléfono con código de país, por ejemplo +1 809 555 0100.", "err");
+  window.open(waUrl(p, $("wa-text").value.trim()), "_blank", "noopener");
+  say("wa-msg", "WhatsApp debería abrirse con el mensaje listo. Envíalo tú desde allí: la app no sabe si se envió.", "ok");
+  const c = waCtx.client;
+  if (c.id && p !== cleanPhone(c.phone || "") && confirm("¿Guardar este teléfono en la ficha del cliente?")) {
+    try { await updateDoc(doc(db, "clients", c.id), { phone: $("wa-phone").value.trim(), updatedAt: serverTimestamp() }); c.phone = $("wa-phone").value.trim(); if (!$("cl-list").closest("section").hidden) renderClients(); }
+    catch (err) { say("wa-msg", "No se pudo guardar el teléfono (" + (err.code || err.message) + ").", "err"); }
+  }
+});
+document.addEventListener("click", (e) => {
+  const d = e.target.dataset;
+  if (!d.waC && !d.waJ && !d.waD) return;
+  if (d.waC) return openWa({ client: clients.find((x) => x.id === d.waC), keys: ["gracias", "libre"] });
+  if (d.waJ) { const j = jobs.find((x) => x.id === d.waJ), c = clients.find((x) => x.id === j.clientId); if (c) openWa({ client: c, job: j, keys: ["confirmacion", "recordatorio", "gracias", "libre"] }); return; }
+  const x = docs.find((y) => y.id === d.waD), c = clients.find((y) => y.id === x.clientId) || { name: x.clientSnapshot.name, phone: x.clientSnapshot.phone };
+  openWa({ client: c, doc: x, keys: [x.type === "cotizacion" ? "cotizacion" : x.type === "factura" ? "factura" : "recibo", "gracias", "libre"] });
+});
+
+// ---- Inicio y Reportes (Fase 5) ---- Lecturas mínimas: rangos por fecha, trabajos abiertos y facturas emitidas.
+const OPEN = ["solicitud", "pendiente", "confirmado", "en_proceso"];
+let home = null;
+const qsDocs = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+const byStart = (a, b) => a.startAt.toMillis() - b.startAt.toMillis();
+const saldoTotal = (inv) => inv.reduce((s, d) => s + d.total - paidOf(d), 0);
+const sumValid = (ps) => ps.filter((p) => p.status === "valid").reduce((s, p) => s + p.amount, 0);
+const openInvoices = async () => qsDocs(await getDocs(query(collection(db, "documents"), where("businessId", "==", bizId), where("type", "==", "factura"), where("status", "==", "emitida"))));
+const paymentsIn = async (a, b) => qsDocs(await getDocs(query(collection(db, "payments"), where("businessId", "==", bizId), where("paidAt", ">=", Timestamp.fromMillis(a)), where("paidAt", "<", Timestamp.fromMillis(b)), orderBy("paidAt", "desc"))));
+
+async function loadHome() {
+  say("hm-msg", "Cargando…");
+  try {
+    if (!clients.length) { const cs = await getDocs(query(collection(db, "clients"), where("businessId", "==", bizId))); clients = qsDocs(cs); }
+    const today = dayKey(Date.now()), t0 = dayStart(today), t8 = dayStart(addDays(today, 8)), m0 = dayStart(today.slice(0, 8) + "01"), m1 = dayStart(nextMonth(today));
+    const [oj, inv, pays] = await Promise.all([
+      getDocs(query(collection(db, "jobs"), where("businessId", "==", bizId), where("status", "in", OPEN))).then(qsDocs),
+      openInvoices(), paymentsIn(m0, m1), ensureRange(new Date(t0), new Date(t8))]);
+    for (const o of oj) { const i = jobs.findIndex((j) => j.id === o.id); if (i >= 0) jobs[i] = o; else jobs.push(o); }
+    home = { today, t0, t8, saldo: saldoTotal(inv), cobros: sumValid(pays) }; stamp.home = Date.now();
+    say("hm-msg", ""); renderHome();
+  } catch (e) { failMsg("hm-msg", e, "el panel de inicio"); }
+}
+
+function homeCard(j) {
+  const [lbl, bg, fg] = STATUS[j.status] || [j.status, "#eee", "#333"];
+  return `<li><div><strong>${fmtDT(j.startAt)}</strong> <span class="badge" style="background:${bg};color:${fg}">${lbl}</span>${lateBadge(j)}<br>${esc(j.title)} · ${esc(clientName(j.clientId))}</div><div><button type="button" class="ghost" data-aedit="${j.id}">Editar</button> <button type="button" class="ghost" data-wa-j="${j.id}">WhatsApp</button></div></li>`;
+}
+function renderHome() {
+  const { today, t0, t8, saldo, cobros } = home, t1 = dayStart(addDays(today, 1)), now = Date.now(), end = (j) => j.startAt.toMillis() + j.durationMinutes * 60000;
+  const sec = (title, list, empty, note) => `<h2>${title} (${list.length})</h2>${note ? `<p class="note">${note}</p>` : ""}<ul class="list">${list.length ? list.map(homeCard).join("") : `<li>${empty}</li>`}</ul>`;
+  const hoy = jobs.filter((j) => j.startAt.toMillis() >= t0 && j.startAt.toMillis() < t1).sort(byStart);
+  const prox = jobs.filter((j) => OPEN.includes(j.status) && j.startAt.toMillis() >= t1 && j.startAt.toMillis() < t8).sort(byStart);
+  const conf = jobs.filter((j) => ["solicitud", "pendiente"].includes(j.status) && end(j) >= now).sort(byStart);
+  const cerrar = jobs.filter((j) => OPEN.includes(j.status) && end(j) < now).sort(byStart);
+  $("hm-body").innerHTML = `<div class="cards"><div class="cardx"><small>Saldo pendiente</small><strong>${pesos(saldo)}</strong></div><div class="cardx"><small>Cobros del mes</small><strong>${pesos(cobros)}</strong></div></div>`
+    + `<p><button type="button" data-go="job">Nuevo trabajo</button> <button type="button" class="ghost" data-go="client">Nuevo cliente</button> <button type="button" class="ghost" data-go="quote">Nueva cotización</button></p>`
+    + sec("Citas de hoy", hoy, "No hay instalaciones para hoy.")
+    + sec("Próximos 7 días", prox, "No hay instalaciones en los próximos 7 días.")
+    + sec("Pendientes de confirmar", conf, "No hay trabajos pendientes de confirmar.")
+    + sec("Por cerrar", cerrar, "No hay trabajos vencidos sin cerrar.", "Pasó su fecha y siguen abiertos. Ábrelos con Editar para marcarlos como completados, cancelados o reprogramarlos.");
+}
+$("hm-refresh").addEventListener("click", () => { cover.length = 0; loadHome(); });
+$("hm-body").addEventListener("click", (e) => {
+  const g = e.target.dataset.go, a = e.target.dataset.aedit;
+  if (g === "job") { location.hash = "#trabajos"; setTimeout(() => openJob(null), 50); }
+  if (g === "client") { location.hash = "#clientes"; setTimeout(() => openForm(null), 50); }
+  if (g === "quote") { location.hash = "#documentos"; setTimeout(async () => { if (!fresh("docs")) await loadDocs(); openDoc("cotizacion"); }, 50); }
+  if (a) { const j = jobs.find((x) => x.id === a); location.hash = "#trabajos"; setTimeout(() => openJob(j), 50); }
+});
+$("more-btn").addEventListener("click", () => { const m = $("more"); m.hidden = !m.hidden; $("more-btn").setAttribute("aria-expanded", String(!m.hidden)); });
+window.addEventListener("hashchange", () => { $("more").hidden = true; $("more-btn").setAttribute("aria-expanded", "false"); });
+
+$("r-go").addEventListener("click", async () => {
+  if (busy) return;
+  const f = $("r-from").value, t = $("r-to").value;
+  if (!f || !t || f > t) return say("r-msg", "Elige un rango válido: la fecha final no puede ser anterior a la inicial.", "err");
+  if (Date.parse(t) - Date.parse(f) > 366 * 864e5) return say("r-msg", "El rango máximo es de un año.", "err");
+  const a = dayStart(f), b = dayStart(addDays(t, 1));
+  busy = true; say("r-msg", "Calculando…");
+  try {
+    if (!clients.length) { const cs = await getDocs(query(collection(db, "clients"), where("businessId", "==", bizId))); clients = qsDocs(cs); }
+    const [pays, dd, inv] = await Promise.all([
+      paymentsIn(a, b),
+      getDocs(query(collection(db, "documents"), where("businessId", "==", bizId), where("issuedAt", ">=", Timestamp.fromMillis(a)), where("issuedAt", "<", Timestamp.fromMillis(b)), orderBy("issuedAt", "desc"))).then(qsDocs),
+      openInvoices(), ensureRange(new Date(a), new Date(b))]);
+    const facts = dd.filter((x) => x.type === "factura" && x.status === "emitida"), js = jobs.filter((j) => j.startAt.toMillis() >= a && j.startAt.toMillis() < b);
+    const cnt = (s) => js.filter((j) => j.status === s).length, row = (k, v) => `<li><div>${k}</div><div><strong>${v}</strong></div></li>`;
+    $("r-body").innerHTML = `<h2>Del ${f.split("-").reverse().join("/")} al ${t.split("-").reverse().join("/")}</h2><ul class="list">`
+      + row("Total cobrado (por fecha de pago)", pesos(sumValid(pays)) + ` · ${pays.filter((p) => p.status === "valid").length} pagos`)
+      + row("Total facturado (por fecha de emisión)", pesos(facts.reduce((s, x) => s + x.total, 0)) + ` · ${facts.length} facturas`)
+      + row("Saldo pendiente de documentos vigentes (hoy)", pesos(saldoTotal(inv)))
+      + row("Trabajos completados", cnt("completado")) + row("Trabajos cancelados", cnt("cancelado"))
+      + `</ul><h2>Trabajos del período por estado</h2><ul class="list">` + Object.keys(STATUS).map((s) => row(STATUS[s][0], cnt(s))).join("") + "</ul>";
+    say("r-msg", "");
+  } catch (e) { failMsg("r-msg", e, "el reporte"); }
+  finally { busy = false; }
+});
 </script>
 </body>
 </html>
