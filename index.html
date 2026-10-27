@@ -61,6 +61,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 #bnav [aria-current=page]{color:var(--brand);font-weight:700;border-top-color:var(--brand)}
 #more{display:grid;position:fixed;bottom:3.6rem;right:.5rem;background:#fff;border:1px solid var(--line);border-radius:8px;padding:.4rem;z-index:6}
 #more a{padding:.6rem 1rem;color:var(--ink);text-decoration:none}}
+.cardbtn{background:#fff;color:var(--ink);text-align:left;margin:0;font-weight:400;width:100%}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -114,8 +115,8 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
         <h2 id="cl-title">Nuevo cliente</h2>
         <label for="c-name">Nombre (obligatorio)</label>
         <input id="c-name" maxlength="120">
-        <label for="c-phone">Teléfono con código de país (obligatorio)</label>
-        <input id="c-phone" type="tel" maxlength="40" placeholder="+1 809 555 0100">
+        <label for="c-phone">Teléfono (obligatorio; 809, 829 o 849; otros países con + y su código)</label>
+        <input id="c-phone" type="tel" maxlength="40" placeholder="809 555 0100">
         <label for="c-email">Correo</label>
         <input id="c-email" type="email" maxlength="120">
         <label for="c-address">Dirección habitual</label>
@@ -189,6 +190,12 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
       <p id="dc-msg" class="msg" role="status"></p>
       <button id="dc-new" type="button">Nueva cotización</button>
       <button id="dc-new-inv" type="button" class="ghost">Nueva factura directa</button>
+      <label for="dc-q">Buscar por número o cliente</label>
+      <input id="dc-q" type="search" placeholder="Ej.: FAC-0003 o Ana">
+      <label for="dc-type">Tipo</label>
+      <select id="dc-type"><option value="">Todos</option><option value="cotizacion">Cotizaciones</option><option value="factura">Facturas</option><option value="recibo">Recibos</option></select>
+      <label for="dc-state">Estado</label>
+      <select id="dc-state"><option value="">Todos</option><option value="borrador">Borrador</option><option value="enviada">Enviada</option><option value="aceptada">Aceptada</option><option value="rechazada">Rechazada</option><option value="emitida">Emitida</option><option value="anulada">Anulada</option></select>
       <ul id="dc-list" class="list"></ul>
       <form id="dc-form" novalidate hidden>
         <h2 id="dc-title">Nueva cotización</h2>
@@ -293,6 +300,13 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
     <a href="#trabajos" data-nav="trabajos">Trabajos</a><a href="#servicios" data-nav="servicios">Servicios</a><a href="#reportes" data-nav="reportes">Reportes</a><a href="#configuracion" data-nav="configuracion">Configuración</a>
   </div>
 </div>
+<dialog id="done-dlg">
+  <h2 id="done-title"></h2>
+  <p>¿Qué quieres hacer con el documento?</p>
+  <button type="button" id="done-pdf">Descargar PDF</button>
+  <button type="button" id="done-wa">Enviar por WhatsApp</button>
+  <button type="button" id="done-close" class="ghost">Cerrar</button>
+</dialog>
 <dialog id="wa-dlg">
   <form id="wa-form" novalidate>
     <h2>Enviar por WhatsApp</h2>
@@ -302,8 +316,10 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
     <select id="wa-tpl"></select>
     <label for="wa-text">Texto (puedes editarlo)</label>
     <textarea id="wa-text" rows="5" maxlength="1000"></textarea>
-    <p class="note">WhatsApp se abre con el mensaje listo y lo envías tú. Si es un documento, descarga su PDF y adjúntalo tú en el chat.</p>
-    <button type="button" id="wa-open">Abrir WhatsApp</button>
+    <p class="note">Los enlaces de WhatsApp no pueden adjuntar archivos. Para enviar el PDF usa «Compartir PDF adjunto» (funciona en el celular) o descárgalo y adjúntalo tú. En ambos casos el envío lo haces tú.</p>
+    <button type="button" id="wa-open">Abrir WhatsApp (solo el mensaje)</button>
+    <button type="button" id="wa-share" class="ghost" hidden>Compartir PDF adjunto</button>
+    <button type="button" id="wa-dl" class="ghost" hidden>Descargar PDF</button>
     <button type="button" id="wa-close" class="ghost">Cerrar</button>
     <p id="wa-msg" class="msg" role="alert"></p>
   </form>
@@ -317,7 +333,7 @@ setTimeout(function(){window.__fail("Tarda demasiado. Revisa tu conexión o prue
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-import { getFirestore, doc, getDoc, updateDoc, serverTimestamp, collection, addDoc, getDocs, query, where, Timestamp, orderBy, limit, runTransaction } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+import { getFirestore, doc, getDoc, updateDoc, serverTimestamp, collection, addDoc, getDocs, query, where, Timestamp, orderBy, limit, runTransaction, startAfter } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
 
 // La configuración web de Firebase no es secreta: la seguridad la dan el login y firestore.rules.
 const firebaseConfig = {
@@ -505,7 +521,7 @@ $("cl-form").addEventListener("submit", async (e) => {
   if (busy) return;
   const d = { name: $("c-name").value.trim(), phone: $("c-phone").value.trim(), email: $("c-email").value.trim(), address: $("c-address").value.trim(), notes: $("c-notes").value.trim() };
   if (!d.name) return say("cl-fmsg", "Escribe el nombre del cliente.", "err");
-  if (!/^\+\d{7,15}$/.test(d.phone.replace(/[\s().-]/g, ""))) return say("cl-fmsg", "Escribe el teléfono con el código de país, por ejemplo +1 809 555 0100.", "err");
+  const np = normPhone(d.phone); if (!np) return say("cl-fmsg", "Escribe el teléfono: 809, 829 o 849 seguido de 7 dígitos (otros países con + y su código).", "err"); d.phone = fmtPhone(np);
   if (d.email && !EMAIL.test(d.email)) return say("cl-fmsg", "El correo no tiene un formato válido.", "err");
   say("cl-fmsg", ""); setBusy("cl-save", true, "Guardando…");
   try {
@@ -768,25 +784,29 @@ async function loadDocs() {
     if (!clients.length) { const cs = await getDocs(query(collection(db, "clients"), where("businessId", "==", bizId))); clients = cs.docs.map((d) => ({ id: d.id, ...d.data() })); }
     if (!services.length) { const ss = await getDocs(query(collection(db, "services"), where("businessId", "==", bizId))); services = ss.docs.map((d) => ({ id: d.id, ...d.data() })); }
     const snap = await getDocs(query(collection(db, "documents"), where("businessId", "==", bizId), orderBy("issuedAt", "desc"), limit(30)));
-    docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    docs = snap.docs.map((d) => ({ id: d.id, ...d.data() })); docsLast = snap.docs[snap.docs.length - 1] || null; docsMore = snap.docs.length === 30;
     stamp.docs = Date.now(); say("dc-msg", ""); renderDocs();
   } catch (e) { failMsg("dc-msg", e, "las cotizaciones"); }
 }
 
 function renderDocs() {
   const inv = new Set(docs.filter((x) => x.type === "factura" && x.sourceDocumentId).map((x) => x.sourceDocumentId));
-  $("dc-list").innerHTML = docs.length ? docs.map((d) => {
-    const q = d.type === "cotizacion", f = d.type === "factura", venc = q && ["borrador", "enviada"].includes(d.status) && d.validUntil.toMillis() < Date.now();
-    const lbl = q ? DSTAT[d.status] || d.status : d.status === "anulada" ? "Anulada" : "Emitida", tipo = q ? "Cotización" : f ? "Factura" : "Recibo";
+  const q = $("dc-q").value.trim().toLowerCase(), tf = $("dc-type").value, sf = $("dc-state").value;
+  const vis = docs.filter((d) => (!tf || d.type === tf) && (!sf || d.status === sf) && (!q || d.number.toLowerCase().includes(q) || d.clientSnapshot.name.toLowerCase().includes(q)));
+  const rows = vis.map((d) => {
+    const qt = d.type === "cotizacion", f = d.type === "factura", venc = qt && ["borrador", "enviada"].includes(d.status) && d.validUntil.toMillis() < Date.now(), facturada = qt && inv.has(d.id);
+    const lbl = qt ? DSTAT[d.status] || d.status : d.status === "anulada" ? "Anulada" : "Emitida", tipo = qt ? "Cotización" : f ? "Factura" : "Recibo";
     const btn = (a, t) => `<button type="button" class="ghost" data-act="${a}" data-id="${d.id}">${t}</button>`;
-    let acts = `<button type="button" class="ghost" data-pdf="${d.id}">PDF</button> <button type="button" class="ghost" data-wa-d="${d.id}">WhatsApp</button>`;
-    if (q && d.status === "borrador") acts += btn("enviada", "Marcar enviada");
-    if (q && ["borrador", "enviada"].includes(d.status)) acts += btn("aceptada", "Aceptar") + btn("rechazada", "Rechazar");
-    if (q && d.status === "aceptada" && !inv.has(d.id)) acts += btn("invoice", "Convertir a factura");
+    let acts = `<button type="button" class="ghost" data-pdf="${d.id}">PDF</button>` + (facturada ? "" : ` <button type="button" class="ghost" data-wa-d="${d.id}">WhatsApp</button>`);
+    if (qt && d.status === "borrador") acts += btn("enviada", "Marcar enviada");
+    if (qt && ["borrador", "enviada"].includes(d.status)) acts += btn("aceptada", "Aceptar") + btn("rechazada", "Rechazar");
+    if (qt && d.status === "aceptada" && !facturada) acts += btn("invoice", "Convertir a factura");
     if (f && d.status === "emitida") acts += btn("cobros", "Cobros") + (paidOf(d) === 0 ? btn("void", "Anular") : "");
     const pago = f && d.status === "emitida" ? `<br>Pagado ${pesos(paidOf(d))} · Saldo ${pesos(d.total - paidOf(d))} · ${payState(d)}` : "";
-    return `<li><div><strong>${esc(d.number)}</strong> <span class="badge" style="background:#e4e7e9;color:#333">${tipo} · ${lbl}</span>${venc ? ' <span class="badge" style="background:#fdecc8;color:#633806">Vencida</span>' : ""}${q && inv.has(d.id) ? ' <span class="badge" style="background:#d4efe9;color:#0b4a3f">Facturada</span>' : ""}<br>${esc(d.clientSnapshot.name)} · ${fd(d.issuedAt)}${q ? " · válida hasta " + fd(d.validUntil) : ""}<br>Total ${pesos(d.total)}${pago}${d.voidReason ? "<br>Motivo de anulación: " + esc(d.voidReason) : ""}</div><div>${acts}</div></li>`;
-  }).join("") + (docs.length >= 30 ? '<li class="note">Se muestran los 30 más recientes.</li>' : "") : "<li>No hay documentos todavía.</li>";
+    const origen = f && d.sourceDocumentId ? " (de " + esc(d.sourceDocumentId.replace(bizId + "_", "")) + ")" : "";
+    return `<li><div><strong>${esc(d.number)}</strong>${origen} <span class="badge" style="background:#e4e7e9;color:#333">${tipo} · ${lbl}</span>${venc ? ' <span class="badge" style="background:#fdecc8;color:#633806">Vencida</span>' : ""}${facturada ? ' <span class="badge" style="background:#d4efe9;color:#0b4a3f">Facturada</span>' : ""}<br>${esc(d.clientSnapshot.name)} · ${fd(d.issuedAt)}${qt ? " · válida hasta " + fd(d.validUntil) : ""}<br>Total ${pesos(d.total)}${pago}${d.voidReason ? "<br>Motivo de anulación: " + esc(d.voidReason) : ""}</div><div>${acts}</div></li>`;
+  }).join("");
+  $("dc-list").innerHTML = (docs.length ? `<li class="note">Mostrando ${vis.length} de ${docs.length} documentos cargados. La búsqueda revisa solo los cargados.</li>` : "") + (rows || "<li>No hay documentos que mostrar.</li>") + (docsMore ? '<li><button type="button" id="dc-more">Cargar más</button></li>' : "");
 }
 
 function renderLines() {
@@ -863,12 +883,12 @@ $("dc-form").addEventListener("submit", async (e) => {
       tx.set(doc(db, "documents", id), { ...data, number, seq, issuedAt: serverTimestamp(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
     });
     docs.unshift({ id, ...data, number, seq, issuedAt: Timestamp.now() });
-    stamp.home = 0; $("dc-form").hidden = true; renderDocs(); say("dc-msg", (type === "factura" ? "Factura " : "Cotización ") + number + " emitida.", "ok");
+    stamp.home = 0; $("dc-form").hidden = true; renderDocs(); say("dc-msg", (type === "factura" ? "Factura " : "Cotización ") + number + " emitida.", "ok"); offerDoc(docs[0], (type === "factura" ? "Factura " : "Cotización ") + number + " emitida");
   } catch (err) { say("dc-fmsg", "No se pudo emitir (" + (err.code || err.message) + "). Inténtalo de nuevo.", "err"); }
   finally { setBusy("dc-save", false, type === "factura" ? "Emitir factura" : "Emitir cotización"); }
 });
 
-async function makePdf(d) {
+async function makePdf(d, mode) {
   if (!window.jspdf) await new Promise((ok, no) => {
     const s = document.createElement("script");
     s.src = "https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js"; s.integrity = "sha384-qovJwSBbRDPP5cEjCp8S0UP66wrvnjaa60XMOGzTNanrThcrGfXfnZkvgY8N1KT3"; s.crossOrigin = "anonymous";
@@ -905,6 +925,7 @@ async function makePdf(d) {
   if (d.notes) { pdf.setFont("helvetica", "bold").text("Notas y condiciones", M, y); pdf.setFont("helvetica", "normal"); pdf.text(pdf.splitTextToSize(d.notes, 180), M, y + 5); }
   const n = pdf.getNumberOfPages();
   for (let i = 1; i <= n; i++) { pdf.setPage(i); pdf.setFontSize(8); pdf.text("Documento comercial; no constituye comprobante fiscal con NCF", 105, 287, { align: "center" }); pdf.text("Página " + i + " de " + n, R, 287, { align: "right" }); }
+  if (mode === "blob") return pdf.output("blob");
   pdf.save(d.number + ".pdf");
 }
 $("dc-list").addEventListener("click", async (e) => {
@@ -948,7 +969,7 @@ $("dc-list").addEventListener("click", async (e) => {
   }
   busy = true; e.target.disabled = true; say("dc-msg", "");
   try {
-    if (a === "invoice") { const n = await toInvoice(d); say("dc-msg", "Factura " + n + " emitida.", "ok"); }
+    if (a === "invoice") { const n = await toInvoice(d); say("dc-msg", "Factura " + n + " emitida.", "ok"); offerDoc(docs[0], "Factura " + n + " emitida"); }
     else if (a === "void") { await updateDoc(doc(db, "documents", d.id), { status: "anulada", voidReason: reason, voidedAt: serverTimestamp(), updatedAt: serverTimestamp() }); d.status = "anulada"; d.voidReason = reason; say("dc-msg", d.number + " anulada.", "ok"); }
     else { await updateDoc(doc(db, "documents", d.id), { status: a, updatedAt: serverTimestamp() }); d.status = a; say("dc-msg", "Estado actualizado.", "ok"); }
   } catch (err) {
@@ -1021,6 +1042,7 @@ $("pg-form").addEventListener("submit", async (e) => {
     d.paidTotal = paid + amount;
     payments.unshift({ id: pRef.id, businessId: bizId, documentId: d.id, receiptId: rid, amount, paidAt, method, reference, status: "valid" });
     stamp.home = 0; $("pg-form").hidden = true; renderPayments(); say("pg-msg", "Pago registrado. Recibo " + number + " emitido.", "ok");
+    try { const rs = await getDoc(doc(db, "documents", rid)), rc = { id: rs.id, ...rs.data() }; docs.unshift(rc); offerDoc(rc, "Recibo " + number + " emitido"); } catch (e2) { /* el recibo se descarga desde la lista de pagos */ }
   } catch (err) { say("pg-fmsg", err.message === "excede-saldo" ? "El saldo cambió y el pago ya lo supera. Recarga la página." : "No se pudo registrar (" + (err.code || err.message) + "). Inténtalo de nuevo.", "err"); }
   finally { setBusy("pg-save", false, "Registrar pago"); }
 });
@@ -1062,7 +1084,7 @@ $("pg-list").addEventListener("click", async (e) => {
 const PHONE = /^\+\d{7,15}$/;
 const cleanPhone = (s) => String(s).replace(/[\s().-]/g, "");
 const waUrl = (phone, text) => "https://wa.me/" + phone.slice(1) + (text ? "?text=" + encodeURIComponent(text) : "");
-const WA_LBL = { confirmacion: "Confirmación de cita", recordatorio: "Recordatorio de cita", cotizacion: "Envío de cotización", factura: "Envío de factura comercial", recibo: "Envío de recibo", gracias: "Agradecimiento", libre: "Mensaje libre" };
+const WA_LBL = { confirmacion: "Confirmación de cita", recordatorio: "Recordatorio de cita", cotizacion: "Envío de cotización", factura: "Envío de factura comercial", recibo: "Envío de recibo", gracias: "Agradecimiento", libre: "Mensaje libre", cobro: "Recordatorio de pago" };
 let waCtx = null;
 function waText(k) {
   const { client: c, job: j, doc: x } = waCtx, n = c.name, b = biz.name || "";
@@ -1073,7 +1095,8 @@ function waText(k) {
     factura: () => `Hola ${n}, le envío la factura comercial ${x.number} por ${pesos(x.total)}. Saldo pendiente: ${pesos(x.total - paidOf(x))}. ${b}`,
     recibo: () => `Hola ${n}, le envío el recibo ${x.number} por ${pesos(x.total)}. Gracias por su pago. ${b}`,
     gracias: () => `Hola ${n}, gracias por confiar en ${b}. Quedamos a su orden.`,
-    libre: () => ""
+    libre: () => "",
+    cobro: () => `Hola ${n}, le recuerdo que tiene un saldo pendiente de ${pesos(waCtx.owed)} (${waCtx.nums.join(", ")}). ${b}`
   };
   return T[k]();
 }
@@ -1081,18 +1104,20 @@ function openWa(ctx) {
   waCtx = ctx;
   $("wa-phone").value = ctx.client.phone || "";
   $("wa-tpl").innerHTML = ctx.keys.map((k) => `<option value="${k}">${WA_LBL[k]}</option>`).join("");
+  const isDoc = !!ctx.doc; $("wa-share").hidden = !isDoc; $("wa-dl").hidden = !isDoc;
+  ctx.blob = isDoc ? makePdf(ctx.doc, "blob").catch(() => null) : null;
   $("wa-text").value = waText(ctx.keys[0]); say("wa-msg", ""); $("wa-dlg").showModal();
 }
 $("wa-tpl").addEventListener("change", () => { $("wa-text").value = waText($("wa-tpl").value); });
 $("wa-close").addEventListener("click", () => $("wa-dlg").close());
 $("wa-open").addEventListener("click", async () => {
-  const p = cleanPhone($("wa-phone").value);
-  if (!PHONE.test(p)) return say("wa-msg", "Escribe el teléfono con código de país, por ejemplo +1 809 555 0100.", "err");
+  const p = normPhone($("wa-phone").value);
+  if (!p) return say("wa-msg", "Escribe el teléfono: 809, 829 o 849 seguido de 7 dígitos (otros países con + y su código).", "err");
   window.open(waUrl(p, $("wa-text").value.trim()), "_blank", "noopener");
   say("wa-msg", "WhatsApp debería abrirse con el mensaje listo. Envíalo tú desde allí: la app no sabe si se envió.", "ok");
   const c = waCtx.client;
-  if (c.id && p !== cleanPhone(c.phone || "") && confirm("¿Guardar este teléfono en la ficha del cliente?")) {
-    try { await updateDoc(doc(db, "clients", c.id), { phone: $("wa-phone").value.trim(), updatedAt: serverTimestamp() }); c.phone = $("wa-phone").value.trim(); if (!$("cl-list").closest("section").hidden) renderClients(); }
+  if (c.id && p !== (normPhone(c.phone || "") || "") && confirm("¿Guardar este teléfono en la ficha del cliente?")) {
+    try { await updateDoc(doc(db, "clients", c.id), { phone: fmtPhone(p), updatedAt: serverTimestamp() }); c.phone = fmtPhone(p); if (!$("cl-list").closest("section").hidden) renderClients(); }
     catch (err) { say("wa-msg", "No se pudo guardar el teléfono (" + (err.code || err.message) + ").", "err"); }
   }
 });
@@ -1124,7 +1149,7 @@ async function loadHome() {
       getDocs(query(collection(db, "jobs"), where("businessId", "==", bizId), where("status", "in", OPEN))).then(qsDocs),
       openInvoices(), paymentsIn(m0, m1), ensureRange(new Date(t0), new Date(t8))]);
     for (const o of oj) { const i = jobs.findIndex((j) => j.id === o.id); if (i >= 0) jobs[i] = o; else jobs.push(o); }
-    home = { today, t0, t8, saldo: saldoTotal(inv), cobros: sumValid(pays) }; stamp.home = Date.now();
+    home = { today, t0, t8, saldo: saldoTotal(inv), cobros: sumValid(pays), inv }; stamp.home = Date.now();
     say("hm-msg", ""); renderHome();
   } catch (e) { failMsg("hm-msg", e, "el panel de inicio"); }
 }
@@ -1134,13 +1159,18 @@ function homeCard(j) {
   return `<li><div><strong>${fmtDT(j.startAt)}</strong> <span class="badge" style="background:${bg};color:${fg}">${lbl}</span>${lateBadge(j)}<br>${esc(j.title)} · ${esc(clientName(j.clientId))}</div><div><button type="button" class="ghost" data-aedit="${j.id}">Editar</button> <button type="button" class="ghost" data-wa-j="${j.id}">WhatsApp</button></div></li>`;
 }
 function renderHome() {
-  const { today, t0, t8, saldo, cobros } = home, t1 = dayStart(addDays(today, 1)), now = Date.now(), end = (j) => j.startAt.toMillis() + j.durationMinutes * 60000;
+  const { today, t0, t8, saldo, cobros, inv } = home, t1 = dayStart(addDays(today, 1)), now = Date.now(), end = (j) => j.startAt.toMillis() + j.durationMinutes * 60000;
   const sec = (title, list, empty, note) => `<h2>${title} (${list.length})</h2>${note ? `<p class="note">${note}</p>` : ""}<ul class="list">${list.length ? list.map(homeCard).join("") : `<li>${empty}</li>`}</ul>`;
   const hoy = jobs.filter((j) => j.startAt.toMillis() >= t0 && j.startAt.toMillis() < t1).sort(byStart);
   const prox = jobs.filter((j) => OPEN.includes(j.status) && j.startAt.toMillis() >= t1 && j.startAt.toMillis() < t8).sort(byStart);
   const conf = jobs.filter((j) => ["solicitud", "pendiente"].includes(j.status) && end(j) >= now).sort(byStart);
   const cerrar = jobs.filter((j) => OPEN.includes(j.status) && end(j) < now).sort(byStart);
-  $("hm-body").innerHTML = `<div class="cards"><div class="cardx"><small>Saldo pendiente</small><strong>${pesos(saldo)}</strong></div><div class="cardx"><small>Cobros del mes</small><strong>${pesos(cobros)}</strong></div></div>`
+  const owe = {};
+  for (const d of inv) { const s = d.total - paidOf(d); if (s > 0) { const o = owe[d.clientId] || (owe[d.clientId] = { name: d.clientSnapshot.name, owed: 0, nums: [] }); o.owed += s; o.nums.push(d.number); } }
+  home.owe = owe;
+  const debtors = Object.keys(owe).sort((a, b) => owe[b].owed - owe[a].owed);
+  $("hm-body").innerHTML = `<div class="cards"><button type="button" class="cardx cardbtn" data-debt="1" aria-expanded="false"><small>Saldo pendiente · toca para ver quién debe</small><strong>${pesos(saldo)}</strong></button><div class="cardx"><small>Cobros del mes</small><strong>${pesos(cobros)}</strong></div></div>`
+    + `<div id="hm-debt" hidden><h2>Clientes con saldo pendiente (${debtors.length})</h2><ul class="list">${debtors.length ? debtors.map((id) => `<li><div><strong>${esc(owe[id].name)}</strong><br>${pesos(owe[id].owed)} · ${owe[id].nums.map(esc).join(", ")}</div><div><button type="button" class="ghost" data-debt-wa="${id}">WhatsApp</button> <button type="button" class="ghost" data-debt-ver="${id}">Ver facturas</button></div></li>`).join("") : "<li>Nadie debe nada en este momento.</li>"}</ul></div>`
     + `<p><button type="button" data-go="job">Nuevo trabajo</button> <button type="button" class="ghost" data-go="client">Nuevo cliente</button> <button type="button" class="ghost" data-go="quote">Nueva cotización</button></p>`
     + sec("Citas de hoy", hoy, "No hay instalaciones para hoy.")
     + sec("Próximos 7 días", prox, "No hay instalaciones en los próximos 7 días.")
@@ -1182,6 +1212,51 @@ $("r-go").addEventListener("click", async () => {
     say("r-msg", "");
   } catch (e) { failMsg("r-msg", e, "el reporte"); }
   finally { busy = false; }
+});
+
+// ---- Ajustes tras las pruebas ----
+const normPhone = (s) => { const c = cleanPhone(s); if (c.startsWith("+")) return PHONE.test(c) ? c : null; if (/^(809|829|849)\d{7}$/.test(c)) return "+1" + c; return /^1(809|829|849)\d{7}$/.test(c) ? "+" + c : null; };
+const fmtPhone = (p) => (/^\+1\d{10}$/.test(p) ? p.replace(/^\+1(\d{3})(\d{3})(\d{4})$/, "+1 $1 $2 $3") : p);
+const docKeys = (x) => [x.type === "cotizacion" ? "cotizacion" : x.type === "factura" ? "factura" : "recibo", "gracias", "libre"];
+
+let docsLast = null, docsMore = false, doneDoc = null;
+["dc-q", "dc-type", "dc-state"].forEach((id) => $(id).addEventListener(id === "dc-q" ? "input" : "change", renderDocs));
+$("dc-list").addEventListener("click", async (e) => {
+  if (e.target.id !== "dc-more" || busy) return;
+  busy = true; e.target.disabled = true;
+  try {
+    const snap = await getDocs(query(collection(db, "documents"), where("businessId", "==", bizId), orderBy("issuedAt", "desc"), startAfter(docsLast), limit(30)));
+    docs.push(...qsDocs(snap)); docsLast = snap.docs[snap.docs.length - 1] || docsLast; docsMore = snap.docs.length === 30;
+  } catch (err) { say("dc-msg", "No se pudieron cargar más documentos (" + (err.code || err.message) + ").", "err"); }
+  finally { busy = false; renderDocs(); }
+});
+
+function offerDoc(d, title) { doneDoc = d; $("done-title").textContent = title; $("done-dlg").showModal(); }
+$("done-close").addEventListener("click", () => $("done-dlg").close());
+$("done-pdf").addEventListener("click", async () => { try { await makePdf(doneDoc); } catch (e) { alert("No se pudo crear el PDF (" + e.message + ")."); } });
+$("done-wa").addEventListener("click", () => {
+  $("done-dlg").close();
+  const x = doneDoc, c = clients.find((y) => y.id === x.clientId) || { name: x.clientSnapshot.name, phone: x.clientSnapshot.phone };
+  openWa({ client: c, doc: x, keys: docKeys(x) });
+});
+
+$("wa-dl").addEventListener("click", async () => { try { await makePdf(waCtx.doc); } catch (e) { say("wa-msg", "No se pudo crear el PDF (" + e.message + ").", "err"); } });
+$("wa-share").addEventListener("click", async () => {
+  try {
+    const blob = await waCtx.blob;
+    if (!blob) throw new Error("no se pudo crear el PDF");
+    const file = new File([blob], waCtx.doc.number + ".pdf", { type: "application/pdf" });
+    if (!navigator.canShare || !navigator.canShare({ files: [file] })) return say("wa-msg", "Este navegador no permite compartir archivos. Usa «Descargar PDF» y adjúntalo en el chat de WhatsApp.", "err");
+    await navigator.share({ files: [file], text: $("wa-text").value.trim() });
+    say("wa-msg", "Se abrió el menú de compartir. Elige WhatsApp y el contacto; la app no sabe si se envió.", "ok");
+  } catch (e) { if (e.name !== "AbortError") say("wa-msg", "No se pudo compartir (" + e.message + "). Usa «Descargar PDF».", "err"); }
+});
+
+$("hm-body").addEventListener("click", (e) => {
+  const t = e.target.dataset;
+  if (t.debt) { const p = $("hm-debt"); p.hidden = !p.hidden; e.target.closest("[data-debt]").setAttribute("aria-expanded", String(!p.hidden)); }
+  if (t.debtWa) { const o = home.owe[t.debtWa], c = clients.find((x) => x.id === t.debtWa) || { name: o.name, phone: "" }; openWa({ client: c, owed: o.owed, nums: o.nums, keys: ["cobro", "libre"] }); }
+  if (t.debtVer) { $("dc-q").value = home.owe[t.debtVer].name; $("dc-type").value = "factura"; $("dc-state").value = "emitida"; location.hash = "#documentos"; setTimeout(renderDocs, 60); }
 });
 </script>
 </body>
